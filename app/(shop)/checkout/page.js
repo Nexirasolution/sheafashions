@@ -49,8 +49,14 @@ export default function CheckoutPage() {
     name: '', phone: '', email: '',
     line1: '', line2: '', city: '', state: '', pincode: '', landmark: ''
   });
+
+  // Coupon: `coupon` is what the user types, `appliedCoupon` is only set
+  // after the server confirms the code is valid.
   const [coupon, setCoupon] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState('');
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
   const [discount, setDiscount] = useState(0);
+
   const [paymentMethod, setPaymentMethod] = useState('razorpay');
   const [submitting, setSubmitting] = useState(false);
   const [checkingStock, setCheckingStock] = useState(false);
@@ -112,17 +118,47 @@ export default function CheckoutPage() {
 
   function update(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
-  async function applyCoupon() {
-    if (!coupon.trim()) return;
-    const res = await fetch('/api/coupons/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: coupon, subtotal })
-    });
-    const data = await res.json();
-    if (data.valid) { setDiscount(data.discount); toast.success(data.message); }
-    else { setDiscount(0); toast.error(data.message); }
+  async function applyCoupon(codeArg) {
+    const code = (typeof codeArg === 'string' ? codeArg : coupon).trim();
+    if (!code) { toast.error('Enter a coupon code'); return; }
+
+    setApplyingCoupon(true);
+    try {
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, subtotal })
+      });
+      const data = await res.json();
+      if (data.valid) {
+        setDiscount(data.discount);
+        setAppliedCoupon(code.toUpperCase());
+        setCoupon(code.toUpperCase());
+        toast.success(data.message);
+      } else {
+        setDiscount(0);
+        setAppliedCoupon('');
+        toast.error(data.message || 'Invalid coupon');
+      }
+    } catch {
+      toast.error('Could not apply coupon, please try again');
+    } finally {
+      setApplyingCoupon(false);
+    }
   }
+
+  function removeCoupon() {
+    setDiscount(0);
+    setAppliedCoupon('');
+    setCoupon('');
+  }
+
+  // If the cart changes after a coupon is applied, re-check it so the
+  // discount never goes stale (min order value, percent amount, etc.).
+  useEffect(() => {
+    if (appliedCoupon) applyCoupon(appliedCoupon);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtotal]);
 
   async function validateStockBeforeOrder() {
     setCheckingStock(true);
@@ -223,7 +259,7 @@ export default function CheckoutPage() {
             items: orderItems,
             customer: { name: form.name, phone: form.phone, email: form.email },
             shippingAddress: form,
-            couponCode: coupon,
+            couponCode: appliedCoupon,
             expectedTotal: total
           })
         });
@@ -254,7 +290,7 @@ export default function CheckoutPage() {
                 items: orderItems,
                 customer: { name: form.name, phone: form.phone, email: form.email },
                 shippingAddress: form,
-                couponCode: coupon,
+                couponCode: appliedCoupon,
                 paymentMethod: 'razorpay',
                 razorpayOrderId: response.razorpay_order_id,
                 razorpayPaymentId: response.razorpay_payment_id,
@@ -286,7 +322,7 @@ export default function CheckoutPage() {
             items: orderItems,
             customer: { name: form.name, phone: form.phone, email: form.email },
             shippingAddress: form,
-            couponCode: coupon,
+            couponCode: appliedCoupon,
             paymentMethod: 'cod'
           })
         });
@@ -302,7 +338,7 @@ export default function CheckoutPage() {
   }
 
   const placeOrderDisabled =
-    submitting || shippingLoading || checkingStock || shipping === null || !deliverable;
+    submitting || shippingLoading || checkingStock || applyingCoupon || shipping === null || !deliverable;
 
   // Only show the "add ₹X more for free shipping" banner when a free-shipping
   // threshold applies (> 0, already resolved for the chosen state) and the
@@ -313,6 +349,8 @@ export default function CheckoutPage() {
       : 0;
   const showFreeShippingBanner =
     deliverable && shipping !== null && shipping > 0 && amountToFreeShipping > 0;
+
+  const applyDisabled = applyingCoupon || !coupon.trim();
 
   return (
     <div className="max-w-4xl mx-auto px-5 sm:px-8 py-8 sm:py-14" style={{ background: PAPER }}>
@@ -412,23 +450,51 @@ export default function CheckoutPage() {
               ))}
             </div>
 
-            {/* <div className="flex gap-2 mt-4">
-              <input
-                placeholder="Coupon code"
-                value={coupon}
-                onChange={(e) => setCoupon(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && applyCoupon()}
-                className={`${inputClass} flex-1`}
-                style={inputStyle}
-              />
-              <button
-                onClick={applyCoupon}
-                className="px-4 text-sm shrink-0 transition-colors"
-                style={{ border: `1px solid ${TEAL}`, color: TEAL, background: PAPER, borderRadius: '3px' }}
-              >
-                Apply
-              </button>
-            </div> */}
+            {/* Coupon: user types the code, then applies it */}
+            <div className="mt-4">
+              <div className="flex gap-2">
+                <input
+                  placeholder="Coupon code"
+                  value={coupon}
+                  disabled={Boolean(appliedCoupon) || applyingCoupon}
+                  onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => e.key === 'Enter' && !appliedCoupon && applyCoupon()}
+                  autoCapitalize="characters"
+                  className={`${inputClass} flex-1 uppercase`}
+                  style={{ ...inputStyle, opacity: appliedCoupon ? 0.7 : 1 }}
+                />
+                {appliedCoupon ? (
+                  <button
+                    type="button"
+                    onClick={removeCoupon}
+                    className="px-4 text-sm shrink-0 transition-colors"
+                    style={{ border: `1px solid ${LINE}`, color: INK_SOFT, background: PAPER, borderRadius: '3px' }}
+                  >
+                    Remove
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => applyCoupon()}
+                    disabled={applyDisabled}
+                    className="px-4 text-sm shrink-0 transition-colors disabled:cursor-not-allowed"
+                    style={{
+                      border: `1px solid ${applyDisabled ? TEAL_DISABLED : TEAL}`,
+                      color: applyDisabled ? TEAL_DISABLED : TEAL,
+                      background: PAPER,
+                      borderRadius: '3px',
+                    }}
+                  >
+                    {applyingCoupon ? 'Applying…' : 'Apply'}
+                  </button>
+                )}
+              </div>
+              {appliedCoupon && (
+                <p className="text-xs mt-1.5" style={{ color: TEAL }}>
+                  {appliedCoupon} applied. You saved {formatINR(discount)}
+                </p>
+              )}
+            </div>
 
             <div style={{ height: '1px', background: LINE }} className="my-4" />
 
@@ -439,7 +505,7 @@ export default function CheckoutPage() {
               </div>
               {discount > 0 && (
                 <div className="flex justify-between" style={{ color: TEAL }}>
-                  <span>Discount</span>
+                  <span>Discount{appliedCoupon ? ` (${appliedCoupon})` : ''}</span>
                   <span>−{formatINR(discount)}</span>
                 </div>
               )}
