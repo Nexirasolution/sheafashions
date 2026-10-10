@@ -40,14 +40,14 @@ export default function BannerCarousel({ banners }) {
   return (
     <section className="relative w-full overflow-hidden" style={{ background: PAPER }}>
       {/*
-        Image-only banner. Mobile gets a tall fixed-height box that the image
-        fully fills (object-cover). Desktop keeps the wide aspect-ratio box.
-        The box has a fixed size, so there is no layout shift while images load.
+        Single-image banner. One desktop image is used on every screen size.
+        The box uses an aspect ratio that changes per breakpoint, and the image
+        fills it completely (object-cover), so there are no gaps on mobile.
+        The ratio is fixed, so there is no layout shift while images load.
       */}
-      <div className="relative w-full h-[500px] sm:h-0 sm:pb-[42.1%]">
+      <div className="relative w-full aspect-[4/3] sm:aspect-[16/7] lg:aspect-[2.4/1]">
 
         {banners.map((b, i) => {
-          const mobileSrc = b.mobileImage || b.image;
           const isActive = i === index;
           const isFirst = i === 0;
           const shouldLoad = isActive || seen.has(i);
@@ -63,23 +63,15 @@ export default function BannerCarousel({ banners }) {
               aria-hidden={!isActive}
             >
               {shouldLoad && (
-                /*
-                  <picture> makes the browser download ONE image (mobile or
-                  desktop). Before, both <img> tags were requested for every
-                  slide, so each visitor downloaded about 2x the banner images.
-                */
-                <picture>
-                  <source media="(min-width: 640px)" srcSet={b.image} />
-                  <img
-                    src={mobileSrc}
-                    alt={b.title || 'Banner'}
-                    // First slide is the LCP element: load it first. Others are lazy.
-                    loading={isFirst ? 'eager' : 'lazy'}
-                    fetchPriority={isFirst ? 'high' : 'auto'}
-                    decoding={isFirst ? 'sync' : 'async'}
-                    className="absolute inset-0 w-full h-full object-cover object-center"
-                  />
-                </picture>
+                <img
+                  src={b.image}
+                  alt={b.title || 'Banner'}
+                  // First slide is the LCP element: load it first. Others are lazy.
+                  loading={isFirst ? 'eager' : 'lazy'}
+                  fetchPriority={isFirst ? 'high' : 'auto'}
+                  decoding={isFirst ? 'sync' : 'async'}
+                  className="absolute inset-0 w-full h-full object-cover object-center"
+                />
               )}
             </Link>
           );
