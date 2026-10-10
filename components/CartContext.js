@@ -37,7 +37,7 @@ function brandToast(message, opts = {}) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         <span>{message}</span>
         <span style={{ fontSize: 9, color: TEAL, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}>
-          Tirupur Clothing Hub
+          Shea Fashions
         </span>
       </div>
     ),
