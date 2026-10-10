@@ -40,12 +40,12 @@ export default function BannerCarousel({ banners }) {
   return (
     <section className="relative w-full overflow-hidden" style={{ background: PAPER }}>
       {/*
-        Single-image banner. One desktop image is used on every screen size.
-        The box uses an aspect ratio that changes per breakpoint, and the image
-        fills it completely (object-cover), so there are no gaps on mobile.
-        The ratio is fixed, so there is no layout shift while images load.
+        MOBILE: the image is shown at full width with its natural height, so the
+        WHOLE image is visible (nothing cropped, no gaps). All slides sit in the
+        same grid cell, so the box is as tall as the image.
+        DESKTOP (sm and up): fixed aspect-ratio box, image fills it (object-cover).
       */}
-      <div className="relative w-full aspect-[4/3] sm:aspect-[16/7] lg:aspect-[2.4/1]">
+      <div className="relative w-full grid sm:block sm:aspect-[16/7] lg:aspect-[2.4/1]">
 
         {banners.map((b, i) => {
           const isActive = i === index;
@@ -56,7 +56,7 @@ export default function BannerCarousel({ banners }) {
             <Link
               key={b._id}
               href={b.link || '#'}
-              className={`absolute inset-0 block transition-opacity duration-700 ${
+              className={`col-start-1 row-start-1 block w-full sm:absolute sm:inset-0 transition-opacity duration-700 ${
                 isActive ? 'opacity-100' : 'opacity-0 pointer-events-none'
               } ${!b.link ? 'pointer-events-none' : ''}`}
               tabIndex={isActive ? 0 : -1}
@@ -70,7 +70,7 @@ export default function BannerCarousel({ banners }) {
                   loading={isFirst ? 'eager' : 'lazy'}
                   fetchPriority={isFirst ? 'high' : 'auto'}
                   decoding={isFirst ? 'sync' : 'async'}
-                  className="absolute inset-0 w-full h-full object-cover object-center"
+                  className="block w-full h-auto sm:absolute sm:inset-0 sm:h-full object-cover object-center"
                 />
               )}
             </Link>
@@ -79,7 +79,7 @@ export default function BannerCarousel({ banners }) {
 
         {count > 1 && (
           <>
-            {/* Arrows: flat, quiet until hovered */}
+            {/* Arrows */}
             <button
               onClick={() => setIndex((i) => (i - 1 + count) % count)}
               className="absolute left-2 sm:left-5 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 rounded-full transition z-10"
@@ -98,7 +98,7 @@ export default function BannerCarousel({ banners }) {
             </button>
 
             {/* Thin dash indicators */}
-            <div className="absolute bottom-4 sm:bottom-5 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+            <div className="absolute bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
               {banners.map((_, i) => (
                 <button
                   key={i}
