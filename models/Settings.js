@@ -12,6 +12,24 @@ const StateShippingSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One YouTube live / video slot (Yesterday, Today or Tomorrow).
+const LiveSlotSchema = new mongoose.Schema(
+  {
+    title: { type: String, default: '' },
+    url: { type: String, default: '' } // any YouTube link; parsed by lib/youtube.js
+  },
+  { _id: false }
+);
+
+const LiveStreamsSchema = new mongoose.Schema(
+  {
+    yesterday: { type: LiveSlotSchema, default: () => ({}) },
+    today: { type: LiveSlotSchema, default: () => ({}) },
+    tomorrow: { type: LiveSlotSchema, default: () => ({}) }
+  },
+  { _id: false }
+);
+
 const SettingsSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true },
@@ -35,6 +53,9 @@ const SettingsSchema = new mongoose.Schema(
 
     // State-wise overrides plus a per-state "deliverable" switch.
     stateShipping: { type: [StateShippingSchema], default: [] },
+
+    // YouTube live links shown on the homepage.
+    liveStreams: { type: LiveStreamsSchema, default: () => ({}) },
 
     seoTitle: { type: String },
     seoDescription: { type: String }

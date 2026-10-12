@@ -4,9 +4,11 @@ import Product from '@/models/Product';
 import Review from '@/models/Review';
 import Combo from '@/models/Combo';
 import Category from '@/models/Category';
+import Settings from '@/models/Settings';
 import BannerCarousel from '@/components/BannerCarousel';
 import ProductCard from '@/components/ProductCard';
 import ReviewSection from '@/components/ReviewSection';
+import LiveSection from '@/components/LiveSection';
 import Reel from '@/models/Reel';
 import ReelsSection from '@/components/ReelsSection';
 
@@ -17,9 +19,10 @@ import { ArrowRight, Tag } from 'lucide-react';
 
 // ISR: the page is built once and served from the CDN, then regenerated in the
 // background at most every 10 minutes. Visitors and bots no longer trigger a
-// function + 6 DB queries on every request. (Replaces `force-dynamic`.)
-// For instant updates after an admin change, call revalidatePath('/') in the
-// admin API routes that save products, banners, categories, combos, reels or reviews.
+// function + 7 DB queries on every request. (Replaces `force-dynamic`.)
+// The admin settings API calls revalidatePath('/') on save, so live-link changes
+// show instantly. For other admin changes (products, banners, categories, combos,
+// reels, reviews) call revalidatePath('/') in those API routes as well.
 export const revalidate = 600;
 
 // Design tokens: shared teal / gold / cream theme
@@ -50,7 +53,7 @@ const REELS_LIMIT = 10;
 async function getData() {
   await dbConnect();
   // Only fetch what the page actually renders.
-  const [banners, newArrivals, reviews, combos, categories, reels] = await Promise.all([
+  const [banners, newArrivals, reviews, combos, categories, reels, settings] = await Promise.all([
     Banner.find({ isActive: true }).sort({ sortOrder: 1 }).lean(),
     Product.find({ isActive: true, isActiveSeller: true })
       .sort({ createdAt: -1 })
@@ -69,10 +72,22 @@ async function getData() {
       .populate('product', 'name slug')
       .limit(REELS_LIMIT)
       .lean(),
+    // YouTube live links (Yesterday / Today / Tomorrow) set in admin settings
+    Settings.findOne({ key: 'global' }).select('liveStreams').lean(),
   ]);
 
   // Serialize once (ObjectId/Date -> plain values) for client components
-  return JSON.parse(JSON.stringify({ banners, newArrivals, reviews, combos, categories, reels }));
+  return JSON.parse(
+    JSON.stringify({
+      banners,
+      newArrivals,
+      reviews,
+      combos,
+      categories,
+      reels,
+      liveStreams: settings?.liveStreams || null,
+    })
+  );
 }
 
 export default async function HomePage() {
@@ -83,6 +98,7 @@ export default async function HomePage() {
     combos: plainCombos,
     categories: plainCategories,
     reels,
+    liveStreams,
   } = await getData();
 
   return (
@@ -130,6 +146,9 @@ export default async function HomePage() {
 
       {/* Banner */}
       <BannerCarousel banners={banners} />
+
+      {/* YouTube live: Yesterday / Today / Tomorrow (hidden if no links set) */}
+      <LiveSection streams={liveStreams} />
 
       {/* Shop by Category */}
       {plainCategories?.length > 0 && (

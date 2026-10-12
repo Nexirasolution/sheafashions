@@ -4,6 +4,13 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Trash2, Plus } from 'lucide-react';
 import { INDIAN_STATES } from '@/lib/indianStates';
+import { getYouTubeId } from '@/lib/youtube';
+
+const LIVE_DAYS = [
+  ['yesterday', 'Yesterday (replay)'],
+  ['today', 'Today (live)'],
+  ['tomorrow', 'Tomorrow (upcoming)']
+];
 
 export default function AdminSettingsPage() {
   const [form, setForm] = useState(null);
@@ -12,11 +19,31 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     fetch('/api/admin/settings')
       .then((r) => r.json())
-      .then((d) => setForm({ ...d.settings, stateShipping: d.settings.stateShipping || [] }));
+      .then((d) =>
+        setForm({
+          ...d.settings,
+          stateShipping: d.settings.stateShipping || [],
+          liveStreams: {
+            yesterday: { title: '', url: '', ...d.settings.liveStreams?.yesterday },
+            today: { title: '', url: '', ...d.settings.liveStreams?.today },
+            tomorrow: { title: '', url: '', ...d.settings.liveStreams?.tomorrow }
+          }
+        })
+      );
   }, []);
 
   async function submit(e) {
     e.preventDefault();
+
+    const badDay = LIVE_DAYS.find(([day]) => {
+      const url = form.liveStreams[day].url.trim();
+      return url && !getYouTubeId(url);
+    });
+    if (badDay) {
+      toast.error(`${badDay[1]}: not a valid YouTube link`);
+      return;
+    }
+
     const res = await fetch('/api/admin/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -53,6 +80,13 @@ export default function AdminSettingsPage() {
     setForm((f) => ({ ...f, stateShipping: f.stateShipping.filter((_, i) => i !== idx) }));
   }
 
+  function updateLive(day, patch) {
+    setForm((f) => ({
+      ...f,
+      liveStreams: { ...f.liveStreams, [day]: { ...f.liveStreams[day], ...patch } }
+    }));
+  }
+
   // Empty input = null = "use the global value"
   const numOrNull = (v) => (v === '' ? null : Number(v));
 
@@ -81,8 +115,40 @@ export default function AdminSettingsPage() {
           <input className="w-full border rounded-lg px-3 py-2 text-sm mt-1" value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         </div>
 
+        {/* ───────── YouTube live ───────── */}
+        <div className="pt-4 border-t">
+          <h2 className="font-semibold text-sm">YouTube Live</h2>
+          <p className="text-xs text-brand-ink/50 mb-3">
+            Paste the YouTube live / video link for each day. Leave blank to hide that day on the website.
+          </p>
+          <div className="space-y-3">
+            {LIVE_DAYS.map(([day, label]) => {
+              const url = form.liveStreams[day].url;
+              const invalid = url.trim() && !getYouTubeId(url);
+              return (
+                <div key={day} className="border rounded-lg p-3">
+                  <label className="text-sm font-medium">{label}</label>
+                  <input
+                    className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+                    placeholder="Title (optional), e.g. Saree Collection Live – 8 PM"
+                    value={form.liveStreams[day].title}
+                    onChange={(e) => updateLive(day, { title: e.target.value })}
+                  />
+                  <input
+                    className={`w-full border rounded-lg px-3 py-2 text-sm mt-2 ${invalid ? 'border-red-400' : ''}`}
+                    placeholder="https://www.youtube.com/live/XXXXXXXXXXX"
+                    value={url}
+                    onChange={(e) => updateLive(day, { url: e.target.value })}
+                  />
+                  {invalid && <p className="text-xs text-red-500 mt-1">Not a valid YouTube link.</p>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* ───────── Global shipping ───────── */}
-        <div className="pt-2">
+        <div className="pt-4 border-t">
           <h2 className="font-semibold text-sm">Default shipping (all states)</h2>
           <p className="text-xs text-brand-ink/50">
             Applies to every state that doesn&apos;t have its own rule below. Total weight = pieces in cart × weight per piece.

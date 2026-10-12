@@ -2,11 +2,13 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { dbConnect } from '@/lib/mongodb';
 import Settings from '@/models/Settings';
 import { requireAdmin } from '@/lib/apiAuth';
 import { calculateShipping } from '@/lib/shipping';
 import { computeCartWeight } from '@/lib/cartWeight';
+import { getYouTubeId } from '@/lib/youtube';
 
 const numOrNull = (v) =>
   v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v);
@@ -30,6 +32,20 @@ function sanitizeStateShipping(list) {
   return [...map.values()];
 }
 
+// Cleans the YouTube live links: trims, caps title length, and blanks any
+// URL that isn't a valid YouTube link.
+function sanitizeLiveStreams(ls) {
+  const out = {};
+  for (const day of ['yesterday', 'today', 'tomorrow']) {
+    const url = String(ls?.[day]?.url || '').trim();
+    out[day] = {
+      title: String(ls?.[day]?.title || '').trim().slice(0, 120),
+      url: getYouTubeId(url) ? url : ''
+    };
+  }
+  return out;
+}
+
 export async function GET() {
   await dbConnect();
   let settings = await Settings.findOne({ key: 'global' });
@@ -41,7 +57,9 @@ export const PUT = requireAdmin(async (req) => {
   await dbConnect();
   const body = await req.json();
   if ('stateShipping' in body) body.stateShipping = sanitizeStateShipping(body.stateShipping);
+  if ('liveStreams' in body) body.liveStreams = sanitizeLiveStreams(body.liveStreams);
   const settings = await Settings.findOneAndUpdate({ key: 'global' }, body, { new: true, upsert: true });
+  revalidatePath('/'); // homepage uses ISR (600s), so refresh it right away
   return NextResponse.json({ settings });
 });
 
