@@ -10,9 +10,6 @@ import { INDIAN_STATES } from '@/lib/indianStates';
 // stashes the full order payload so the webhook can build the order
 // even if the customer's browser never calls back, then creates the
 // Razorpay order for the verified total.
-//
-// `expectedTotal` is only compared against the server total so a mismatch
-// is caught before the Razorpay popup opens.
 export async function POST(req) {
   try {
     await dbConnect();
@@ -26,35 +23,46 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Please select a valid delivery state' }, { status: 400 });
     }
 
-    const { subtotal, discount, shippingFee, total } = await buildOrderItemsAndTotals(
-      items,
-      couponCode,
-      shippingAddress.state
-    );
+    const { subtotal, discount, shippingFee, total, appliedCoupon, skippedIndexes } =
+      await buildOrderItemsAndTotals(items, couponCode, shippingAddress.state);
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('CREATE-ORDER DEBUG', {
-        subtotal,
-        discount,
-        shippingFee,
-        total,
+        subtotal, discount, shippingFee, total,
         state: shippingAddress.state,
+        couponSent: couponCode || '',
+        couponApplied: appliedCoupon,
+        skippedIndexes,
         amountInPaise: Math.round(total * 100),
         expectedTotal
       });
+    }
+
+    // Some cart lines no longer exist: the customer must review the cart.
+    if (skippedIndexes?.length) {
+      return NextResponse.json(
+        {
+          error: 'Some items in your cart are no longer available. Please review your cart and try again.',
+          server: { subtotal, discount, shippingFee, total }
+        },
+        { status: 409 }
+      );
     }
 
     // Guard: the page showed one total, the server computed another.
     if (expectedTotal !== undefined && expectedTotal !== null) {
       if (Math.abs(total - Number(expectedTotal)) > 1) {
         return NextResponse.json(
-          { error: 'Prices or shipping changed. Please review your total and try again.' },
+          {
+            error: 'Prices or shipping changed. Please review your total and try again.',
+            server: { subtotal, discount, shippingFee, total },
+            expectedTotal: Number(expectedTotal)
+          },
           { status: 409 }
         );
       }
     }
 
-    // Razorpay minimum is ₹1 (100 paise). A tiny/zero total means pricing is broken.
     if (!Number.isFinite(total) || total < 1) {
       console.error('Invalid order total computed:', { subtotal, discount, shippingFee, total });
       return NextResponse.json({ error: 'Could not calculate order total' }, { status: 500 });

@@ -81,6 +81,7 @@ function mergeLine(list, item) {
       ...copy[idx],
       qty: finalQty,
       stock: stockLimit,
+      price: item.price ?? copy[idx].price, // take the latest price
       pieces: item.pieces ?? copy[idx].pieces,
     };
     return { list: copy, status: finalQty < desiredQty ? 'clamped' : 'added' };
@@ -101,8 +102,7 @@ export function CartProvider({ children }) {
   const [loaded, setLoaded] = useState(false);
 
   // Always holds the latest cart so actions can compute the result and show
-  // the right toast synchronously (no side effects inside state updaters,
-  // which React may run late or twice).
+  // the right toast synchronously.
   const itemsRef = useRef([]);
 
   const commit = useCallback((next) => {
@@ -208,6 +208,36 @@ export function CartProvider({ children }) {
     brandToast('Removed from cart', { icon: '🗑️', style: warnStyle });
   }, [commit]);
 
+  // Removes several lines at once with one toast (used when the server says
+  // some lines no longer exist).
+  const removeItems = useCallback((keys) => {
+    if (!keys?.length) return;
+    const set = new Set(keys);
+    commit(itemsRef.current.filter((i) => !set.has(cartKey(i))));
+    brandToast('Some items are no longer available and were removed', { icon: '⚠️', style: warnStyle });
+  }, [commit]);
+
+  // Applies server prices: updates: [{ key, price }]. Shows one toast if anything changed.
+  const syncPrices = useCallback((updates) => {
+    if (!updates?.length) return;
+    const map = new Map(updates.map((u) => [u.key, u.price]));
+    let changed = false;
+
+    const next = itemsRef.current.map((i) => {
+      const p = map.get(cartKey(i));
+      if (p !== undefined && p !== i.price) {
+        changed = true;
+        return { ...i, price: p };
+      }
+      return i;
+    });
+
+    if (changed) {
+      commit(next);
+      brandToast('Some prices were updated', { icon: 'ℹ️', style: warnStyle });
+    }
+  }, [commit]);
+
   const setItemStock = useCallback((key, stock) => {
     commit(
       itemsRef.current.map((i) => {
@@ -225,12 +255,9 @@ export function CartProvider({ children }) {
     });
   }, [commit]);
 
-  // Memoized so components using useCart() only re-render when the cart changes,
-  // not every time the provider re-renders.
   const value = useMemo(() => {
     const subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);
     const count = items.reduce((s, i) => s + i.qty, 0);
-    // Physical pieces (combo lines expand to their piece count), used for shipping weight.
     const totalPieces = totalPiecesOf(items);
 
     return {
@@ -239,13 +266,15 @@ export function CartProvider({ children }) {
       addItems,
       updateQty,
       removeItem,
+      removeItems,
+      syncPrices,
       setItemStock,
       clearCart,
       subtotal,
       count,
       totalPieces,
     };
-  }, [items, addItem, addItems, updateQty, removeItem, setItemStock, clearCart]);
+  }, [items, addItem, addItems, updateQty, removeItem, removeItems, syncPrices, setItemStock, clearCart]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

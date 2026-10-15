@@ -22,6 +22,14 @@ const body = Poppins({
   display: 'swap',
 });
 
+const SITE_NAME = 'Shea Fashions';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.sheafashions.in';
+const DEFAULT_TITLE = 'Shea Fashions - Women Kurtis, Nighties & Innerwear Online';
+const DEFAULT_DESCRIPTION =
+  'Shop authentic women kurtis, nighties, innerwear and trending collections online from Shea Fashions. Comfortable fits, quality fabrics and great prices with delivery across India.';
+// Place a 1200x630 image at /public/og-image.jpg
+const DEFAULT_OG_IMAGE = '/og-image.jpg';
+
 // Cached for 1 hour. Call revalidateTag('settings') after saving settings in admin.
 const getSeoSettings = unstable_cache(
   async () => {
@@ -44,27 +52,123 @@ const getSeoSettings = unstable_cache(
 export async function generateMetadata() {
   const settings = await getSeoSettings();
 
-  const title = settings?.seoTitle || 'Tirupur Clothing Hub - Women Kurtis, Nighties & More';
-  const description =
-    settings?.seoDescription ||
-    'Shop authentic women kurtis, nighties, innerwear and trending collections online from Tirupur Clothing Hub.';
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.tirupurclothinghub.com';
+  const title = settings?.seoTitle || DEFAULT_TITLE;
+  const description = settings?.seoDescription || DEFAULT_DESCRIPTION;
 
   return {
-    title: { default: title, template: '%s | Tirupur Clothing Hub' },
+    metadataBase: new URL(SITE_URL),
+    title: { default: title, template: `%s | ${SITE_NAME}` },
     description,
-    metadataBase: new URL(siteUrl),
-    keywords: ['women kurtis online', 'nighties online', 'innerwear online', 'Tirupur Clothing Hub', 'women fashion'],
-    openGraph: { title, description, siteName: 'Tirupur Clothing Hub', type: 'website' },
-    icons: { icon: '/favicon.ico' },
+    applicationName: SITE_NAME,
+    keywords: [
+      'women kurtis online',
+      'kurtis for women',
+      'cotton kurtis',
+      'nighties online',
+      'night wear for women',
+      'innerwear online',
+      'ladies innerwear',
+      'Shea Fashions',
+      'women fashion India',
+    ],
+    authors: [{ name: SITE_NAME, url: SITE_URL }],
+    creator: SITE_NAME,
+    publisher: SITE_NAME,
+    category: 'fashion',
+    alternates: {
+      canonical: '/',
+    },
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
+        'max-video-preview': -1,
+      },
+    },
+    openGraph: {
+      title,
+      description,
+      url: SITE_URL,
+      siteName: SITE_NAME,
+      locale: 'en_IN',
+      type: 'website',
+      images: [
+        {
+          url: DEFAULT_OG_IMAGE,
+          width: 1200,
+          height: 630,
+          alt: `${SITE_NAME} - Women Kurtis, Nighties & More`,
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [DEFAULT_OG_IMAGE],
+    },
+    formatDetection: {
+      telephone: false,
+      email: false,
+      address: false,
+    },
+    // Add NEXT_PUBLIC_GOOGLE_VERIFICATION to .env to verify Google Search Console
+    verification: process.env.NEXT_PUBLIC_GOOGLE_VERIFICATION
+      ? { google: process.env.NEXT_PUBLIC_GOOGLE_VERIFICATION }
+      : undefined,
+    icons: {
+      icon: '/favicon.ico',
+      apple: '/apple-touch-icon.png',
+    },
   };
 }
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#ffffff',
+};
+
+// Structured data (JSON-LD) so Google can understand the brand and site
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'Organization',
+      '@id': `${SITE_URL}/#organization`,
+      name: SITE_NAME,
+      url: SITE_URL,
+      logo: `${SITE_URL}/logo.png`,
+      // Add your social profile URLs here, e.g. Instagram, Facebook
+      sameAs: [],
+    },
+    {
+      '@type': 'WebSite',
+      '@id': `${SITE_URL}/#website`,
+      url: SITE_URL,
+      name: SITE_NAME,
+      inLanguage: 'en-IN',
+      publisher: { '@id': `${SITE_URL}/#organization` },
+    },
+  ],
+};
+
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en-IN">
       {/* background comes from globals.css (white) */}
       <body className={`${display.variable} ${body.variable} font-body antialiased`}>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c'),
+          }}
+        />
+
         <CartProvider>
           <WishlistProvider>
             {children}

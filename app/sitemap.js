@@ -6,29 +6,51 @@ import Category from '@/models/Category';
 export const revalidate = 3600;
 
 export default async function sitemap() {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.tirupurclothinghub.com';
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.sheafashions.in').replace(/\/+$/, '');
   let products = [];
   let categories = [];
 
   try {
     await dbConnect();
     [products, categories] = await Promise.all([
-      Product.find({ isActive: true }).select('slug updatedAt').lean(),
-      Category.find({ isActive: true }).select('slug updatedAt').lean(),
+      Product.find({ isActive: true, slug: { $exists: true, $ne: '' } })
+        .select('slug updatedAt')
+        .sort({ updatedAt: -1 })
+        .lean(),
+      Category.find({ isActive: true, slug: { $exists: true, $ne: '' } })
+        .select('slug updatedAt')
+        .sort({ updatedAt: -1 })
+        .lean(),
     ]);
-  } catch {}
+  } catch (err) {
+    console.error('Sitemap: failed to load products/categories', err);
+  }
 
-  // Only pages you want indexed (cart/checkout are disallowed in robots.js)
-  const staticRoutes = [{ url: siteUrl }];
+  const toDate = (d) => (d ? new Date(d) : undefined);
+
+  // Only pages you want indexed (cart/checkout are disallowed in robots.js).
+  // Add other public pages here, e.g. `${siteUrl}/about`, `${siteUrl}/contact`.
+  const staticRoutes = [
+    {
+      url: siteUrl,
+      lastModified: new Date(),
+      changeFrequency: 'daily',
+      priority: 1,
+    },
+  ];
 
   const categoryRoutes = categories.map((c) => ({
-    url: `${siteUrl}/category/${c.slug}`,
-    lastModified: c.updatedAt || undefined,
+    url: `${siteUrl}/category/${encodeURIComponent(c.slug)}`,
+    lastModified: toDate(c.updatedAt),
+    changeFrequency: 'weekly',
+    priority: 0.8,
   }));
 
   const productRoutes = products.map((p) => ({
-    url: `${siteUrl}/product/${p.slug}`,
-    lastModified: p.updatedAt || undefined,
+    url: `${siteUrl}/product/${encodeURIComponent(p.slug)}`,
+    lastModified: toDate(p.updatedAt),
+    changeFrequency: 'weekly',
+    priority: 0.7,
   }));
 
   return [...staticRoutes, ...categoryRoutes, ...productRoutes];

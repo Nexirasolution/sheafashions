@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useCart, cartKey } from '@/components/CartContext';
+import { useCartQuote } from '@/lib/useCartQuote';
 import { formatINR } from '@/lib/utils';
 import { Trash2, ShoppingBag } from 'lucide-react';
 
@@ -17,6 +18,8 @@ const FONT_SERIF = "Georgia, 'Times New Roman', serif";
 
 export default function CartPage() {
   const { items, updateQty, removeItem, subtotal } = useCart();
+  // Checks the cart against the server and fixes stale prices / removed products.
+  const { loading: syncing } = useCartQuote();
 
   if (items.length === 0) {
     return (
@@ -44,6 +47,15 @@ export default function CartPage() {
       <div className="space-y-0">
         {items.map((item, idx) => {
           const key = cartKey(item);
+          const details = [
+            item.color && `Color: ${item.color}`,
+            !item.packDetails && item.size && `Size: ${item.size}`,
+            item.sleeveType,
+            item.zipType,
+            item.pantOption?.name && `Pant: ${item.pantOption.name}`,
+            item.shawlOption?.name && `Shawl: ${item.shawlOption.name}`,
+          ].filter(Boolean).join(' · ');
+
           return (
             <div
               key={key}
@@ -58,9 +70,9 @@ export default function CartPage() {
               {/* Product info */}
               <div className="flex-1 min-w-0">
                 <p className="text-sm line-clamp-1" style={{ color: INK }}>{item.name}</p>
-                <p className="text-xs mt-1" style={{ color: INK_SOFT }}>
-                  Color: {item.color} &nbsp;·&nbsp; Size: {item.size}
-                </p>
+                {details && (
+                  <p className="text-xs mt-1" style={{ color: INK_SOFT }}>{details}</p>
+                )}
                 {item.isCombo && item.pieces > 1 && (
                   <p className="text-xs mt-0.5" style={{ color: INK_SOFT }}>
                     {item.pieces} pieces{item.qty > 1 ? ` each · ${item.qty * item.pieces} total` : ''}
@@ -112,9 +124,11 @@ export default function CartPage() {
         })}
       </div>
 
-      {/* Subtotal card */}
+      {/* Subtotal */}
       <div className="flex items-center justify-between pt-6 mt-2">
-        <span className="text-sm" style={{ color: INK_SOFT }}>Subtotal</span>
+        <span className="text-sm" style={{ color: INK_SOFT }}>
+          Subtotal{syncing ? ' · checking prices…' : ''}
+        </span>
         <span className="text-lg" style={{ color: TEAL, fontFamily: FONT_SERIF }}>{formatINR(subtotal)}</span>
       </div>
 

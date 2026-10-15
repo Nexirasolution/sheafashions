@@ -1,23 +1,33 @@
+// app/api/coupons/validate/route.js  (FULL FILE)
+// POST { code, items, state }
+// The subtotal is computed on the server from the cart items; a client-sent
+// subtotal is no longer trusted.
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/mongodb';
-import Coupon from '@/models/Coupon';
-import { genCouponCheck } from '@/lib/utils';
+import { buildOrderItemsAndTotals, OrderError } from '@/lib/orderCalc';
+import { evaluateCoupon } from '@/lib/coupon';
 
 export async function POST(req) {
-  await dbConnect();
-  const { code, subtotal } = await req.json();
-  const coupon = await Coupon.findOne({ code: genCouponCheck(code), isActive: true });
-  if (!coupon) return NextResponse.json({ valid: false, message: 'Invalid coupon code' });
-  if (coupon.expiresAt && coupon.expiresAt < new Date()) {
-    return NextResponse.json({ valid: false, message: 'This coupon has expired' });
+  try {
+    await dbConnect();
+    const { code, items, state } = await req.json();
+
+    if (!Array.isArray(items) || !items.length) {
+      return NextResponse.json({ valid: false, message: 'Your cart is empty' });
+    }
+
+    const { subtotal } = await buildOrderItemsAndTotals(items, '', state || '', {
+      allowUndeliverable: true
+    });
+
+    return NextResponse.json(await evaluateCoupon(code, subtotal));
+  } catch (err) {
+    if (err instanceof OrderError) {
+      return NextResponse.json({ valid: false, message: err.message });
+    }
+    console.error('Coupon validate failed:', err);
+    return NextResponse.json({ valid: false, message: 'Could not apply coupon, please try again' });
   }
-  if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
-    return NextResponse.json({ valid: false, message: 'This coupon has reached its usage limit' });
-  }
-  if (subtotal < (coupon.minOrderValue || 0)) {
-    return NextResponse.json({ valid: false, message: `Minimum order value is ₹${coupon.minOrderValue}` });
-  }
-  let discount = coupon.type === 'percent' ? (subtotal * coupon.value) / 100 : coupon.value;
-  if (coupon.maxDiscount) discount = Math.min(discount, coupon.maxDiscount);
-  return NextResponse.json({ valid: true, discount: Math.round(discount), message: 'Coupon applied!' });
 }
