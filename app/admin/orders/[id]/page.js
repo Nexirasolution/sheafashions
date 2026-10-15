@@ -9,7 +9,7 @@ import { buildProductIndex, resolveOrderItem } from '@/lib/orderItemResolver';
 import OrderItemModal from '@/components/admin/OrderItemModal';
 
 const STATUSES = ['placed', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled', 'returned'];
-const STORE_NAME = 'Tirupur Clothing Hub';
+const STORE_NAME = 'Shea Fashions';
 
 // Accepts 10-digit numbers, 0-prefixed, or 91-prefixed. Returns null if invalid.
 function normalizeIndianPhone(phone) {
