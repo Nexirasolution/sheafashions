@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { X, CheckCircle2, MessageCircle, Search } from 'lucide-react';
 import CourierScanner from '@/components/admin/CourierScanner';
 import { parseCourierScan, findOrderInScan } from '@/lib/courierScan';
+import { buildTrackingUrl, findCourierByName } from '@/lib/courierUtils';
+import { useCouriers } from '@/lib/useCouriers';
 import { whatsappLink } from '@/lib/whatsapp';
 
 const FINISHED = ['shipped', 'delivered', 'cancelled', 'returned'];
@@ -34,15 +37,18 @@ function feedback(ok = true) {
  * Props
  *  open        – show/hide
  *  onClose     – called when the modal closes
- *  onChanged   – called after closing if anything was saved (refresh your list here)
- *  fixedOrder  – optional: lock the scanner to one order (used on the order detail page)
+ *  onChanged   – called after saving (refresh your page data here)
+ *  fixedOrder  – optional: lock the scanner to one order (order detail page)
  */
 export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = null }) {
+  const { couriers, defaultCourier } = useCouriers();
+
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [autoShip, setAutoShip] = useState(true);
-  const [currentOrder, setCurrentOrder] = useState(null); // order chosen by scanning its label
-  const [pending, setPending] = useState(null); // courier data waiting for an order
+  const [courierId, setCourierId] = useState('');
+  const [currentOrder, setCurrentOrder] = useState(null);
+  const [pending, setPending] = useState(null);
   const [pickQuery, setPickQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [log, setLog] = useState([]);
@@ -53,7 +59,15 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
   ordersRef.current = orders;
   const busy = useRef(false);
   const changed = useRef(false);
+  const courierTouched = useRef(false);
   const lastScan = useRef({ raw: '', at: 0 });
+
+  // Pre-select the courier: the order's own courier, else the default one
+  useEffect(() => {
+    if (!open || courierTouched.current) return;
+    const own = fixedOrder ? findCourierByName(couriers, fixedOrder.courier?.partner) : null;
+    setCourierId(own?._id || defaultCourier?._id || '');
+  }, [open, couriers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset + load orders each time the modal opens
   useEffect(() => {
@@ -65,6 +79,7 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
     setFlash(null);
     changed.current = false;
     busy.current = false;
+    courierTouched.current = false;
     lastScan.current = { raw: '', at: 0 };
 
     if (fixedOrder) {
@@ -84,7 +99,14 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
     return () => { cancelled = true; };
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Orders shown in the "which order is this?" list
+  // Lock page scroll behind the modal (mobile)
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
   const candidates = useMemo(() => {
     const q = pickQuery.trim().toLowerCase();
     return orders
@@ -96,9 +118,9 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
           .some((v) => String(v).toLowerCase().includes(q));
       })
       .sort((a, b) => {
-        const aNeeds = a.courier?.awbNumber ? 1 : 0;
-        const bNeeds = b.courier?.awbNumber ? 1 : 0;
-        if (aNeeds !== bNeeds) return aNeeds - bNeeds; // orders without an AWB first
+        const aHas = a.courier?.awbNumber ? 1 : 0;
+        const bHas = b.courier?.awbNumber ? 1 : 0;
+        if (aHas !== bHas) return aHas - bHas; // orders without an AWB first
         return new Date(b.createdAt) - new Date(a.createdAt);
       })
       .slice(0, 8);
@@ -120,10 +142,16 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
     busy.current = true;
     setSaving(true);
     try {
+      // Courier: one detected from the receipt wins, otherwise the one picked above
+      const detected = findCourierByName(couriers, parsed.partner);
+      const chosen = detected || couriers.find((c) => c._id === courierId) || null;
+      const awb = parsed.awbNumber || order.courier?.awbNumber || '';
+      const url = chosen ? buildTrackingUrl(chosen, awb) : '';
+
       const courier = {
-        partner: parsed.partner || order.courier?.partner || '',
-        awbNumber: parsed.awbNumber || order.courier?.awbNumber || '',
-        trackingId: parsed.trackingId || order.courier?.trackingId || '',
+        partner: chosen?.name || parsed.partner || order.courier?.partner || '',
+        awbNumber: awb,
+        trackingId: url || parsed.trackingId || order.courier?.trackingId || '',
       };
 
       const res = await fetch(`/api/orders/${order._id}`, {
@@ -148,6 +176,8 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
       setOrders((prev) => prev.map((o) => (o._id === order._id ? updated : o)));
       changed.current = true;
       feedback(true);
+
+      if (!courier.partner) toast('Saved without a courier name. Pick a courier above next time.', { icon: '⚠️' });
 
       if (fixedOrder) {
         toast.success('Courier details saved');
@@ -181,22 +211,16 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
     if (lastScan.current.raw === raw && now - lastScan.current.at < 3000) return;
     lastScan.current = { raw, at: now };
 
-    // 1. Does the code mention one of our orders?
     const match = findOrderInScan(raw, ordersRef.current);
     if (match) {
       const parsed = parseCourierScan(match.rest);
-      if (parsed?.awbNumber) {
-        // receipt carries both order number and AWB -> save straight away
-        return saveToOrder(match.order, parsed);
-      }
-      // it was just the order's own label -> wait for the courier receipt
+      if (parsed?.awbNumber) return saveToOrder(match.order, parsed);
       feedback(true);
       setPending(null);
       setCurrentOrder(match.order);
       return;
     }
 
-    // 2. Otherwise treat it as courier data
     const parsed = parseCourierScan(raw);
     if (!parsed) {
       feedback(false);
@@ -206,7 +230,7 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
     if (currentOrder) return saveToOrder(currentOrder, parsed);
 
     feedback(true);
-    setPending(parsed); // ask the admin which order it belongs to
+    setPending(parsed);
   }
 
   function submitManual(e) {
@@ -226,164 +250,184 @@ export default function ScanShipModal({ open, onClose, onChanged, fixedOrder = n
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white w-full sm:max-w-lg max-h-[95vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center sm:p-4">
+      <div className="bg-white w-full sm:max-w-lg h-[100dvh] sm:h-auto sm:max-h-[92vh] flex flex-col sm:rounded-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-brand-ink/10">
+          <div className="min-w-0">
             <h3 className="font-semibold">Scan courier receipt</h3>
-            <p className="text-xs text-brand-ink/50">
-              {fixedOrder ? `For order ${fixedOrder.orderNumber}` : 'Details are saved automatically after each scan.'}
+            <p className="text-xs text-brand-ink/50 truncate">
+              {fixedOrder ? `For order ${fixedOrder.orderNumber}` : 'Saved automatically after each scan'}
             </p>
           </div>
-          <button onClick={close} className="p-1.5 rounded-md hover:bg-brand-ink/5" aria-label="Close scanner">
-            <X size={18} />
+          <button onClick={close} className="p-2 -mr-2 rounded-md hover:bg-brand-ink/5" aria-label="Close scanner">
+            <X size={20} />
           </button>
         </div>
 
-        {/* What to do next */}
-        {currentOrder && !fixedOrder ? (
-          <div className="mb-3 rounded-lg bg-brand-ink/5 p-3 text-sm flex items-start justify-between gap-3">
-            <p>
-              Order <b>{currentOrder.orderNumber}</b> ({currentOrder.customer?.name || 'customer'}) selected.
-              <br />
-              <span className="text-brand-ink/60">Now scan the courier receipt.</span>
-            </p>
-            <button onClick={() => setCurrentOrder(null)} className="text-xs underline text-brand-magenta shrink-0">
-              Change
-            </button>
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {/* Courier choice */}
+          <div>
+            <label className="block text-xs text-brand-ink/60">
+              Courier
+              <select
+                value={courierId}
+                onChange={(e) => { courierTouched.current = true; setCourierId(e.target.value); }}
+                className="mt-1 w-full border rounded-lg px-3 py-2.5 text-sm text-brand-ink bg-white"
+              >
+                <option value="">Detect from receipt</option>
+                {couriers.map((c) => (
+                  <option key={c._id} value={c._id}>{c.name}{c.isDefault ? ' (default)' : ''}</option>
+                ))}
+              </select>
+            </label>
+            {couriers.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">
+                No couriers saved yet.{' '}
+                <Link href="/admin/couriers" className="underline">Add couriers</Link> so the tracking link is created automatically.
+              </p>
+            )}
           </div>
-        ) : !pending && !fixedOrder ? (
-          <p className="mb-3 text-sm text-brand-ink/70">
-            Point the camera at the courier receipt. If it shows your order number it saves right away; otherwise
-            you'll pick the order.
-          </p>
-        ) : null}
 
-        {loading ? (
-          <p className="text-sm text-brand-ink/50 py-10 text-center">Loading orders…</p>
-        ) : (
-          <CourierScanner onScan={handleScan} />
-        )}
-
-        {/* Saved confirmation */}
-        {flash && (
-          <div className="mt-3 flex items-center gap-2 rounded-lg bg-green-50 text-green-700 p-3 text-sm">
-            <CheckCircle2 size={18} className="shrink-0" />
-            <span>
-              Saved for <b>{flash.orderNumber}</b>
-              {flash.courier?.awbNumber ? ` · AWB ${flash.courier.awbNumber}` : ''}
-              {flash.status === 'shipped' ? ' · marked shipped' : ''}
-            </span>
-          </div>
-        )}
-
-        {saving && <p className="mt-3 text-sm text-brand-ink/60">Saving…</p>}
-
-        {/* Pick an order for a scanned receipt */}
-        {pending && !fixedOrder && (
-          <div className="mt-3 rounded-lg border border-brand-magenta/30 p-3">
-            <p className="text-sm mb-2">
-              Scanned <b>{pending.awbNumber || 'tracking link'}</b>
-              {pending.partner ? ` (${pending.partner})` : ''}. Which order is it for?
-            </p>
-            <div className="relative mb-2">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-brand-ink/40" />
-              <input
-                value={pickQuery}
-                onChange={(e) => setPickQuery(e.target.value)}
-                placeholder="Search order number, name or phone"
-                className="w-full border rounded-lg pl-8 pr-3 py-2 text-sm"
-              />
+          {/* Next step */}
+          {currentOrder && !fixedOrder ? (
+            <div className="rounded-lg bg-brand-ink/5 p-3 text-sm flex items-start justify-between gap-3">
+              <p>
+                Order <b>{currentOrder.orderNumber}</b> ({currentOrder.customer?.name || 'customer'}) selected.
+                <span className="block text-brand-ink/60">Now scan the courier receipt.</span>
+              </p>
+              <button onClick={() => setCurrentOrder(null)} className="text-xs underline text-brand-magenta shrink-0 py-1">
+                Change
+              </button>
             </div>
-            <ul className="max-h-48 overflow-y-auto divide-y divide-brand-ink/5">
-              {candidates.map((o) => (
-                <li key={o._id}>
-                  <button
-                    disabled={saving}
-                    onClick={() => saveToOrder(o, pending)}
-                    className="w-full text-left px-2 py-2 text-sm hover:bg-brand-ink/5 rounded-md flex justify-between gap-3 disabled:opacity-50"
-                  >
-                    <span>
-                      <b>{o.orderNumber}</b> · {o.customer?.name}
-                      <span className="block text-xs text-brand-ink/50 capitalize">
-                        {o.status}
-                        {o.courier?.awbNumber ? ` · already has AWB ${o.courier.awbNumber}` : ''}
+          ) : !pending && !fixedOrder ? (
+            <p className="text-sm text-brand-ink/70">
+              Point the camera at the courier receipt. If it shows your order number it saves right away; otherwise
+              you'll pick the order.
+            </p>
+          ) : null}
+
+          {loading ? (
+            <p className="text-sm text-brand-ink/50 py-10 text-center">Loading orders…</p>
+          ) : (
+            <CourierScanner onScan={handleScan} />
+          )}
+
+          {flash && (
+            <div className="flex items-center gap-2 rounded-lg bg-green-50 text-green-700 p-3 text-sm">
+              <CheckCircle2 size={18} className="shrink-0" />
+              <span>
+                Saved for <b>{flash.orderNumber}</b>
+                {flash.courier?.partner ? ` · ${flash.courier.partner}` : ''}
+                {flash.courier?.awbNumber ? ` · ${flash.courier.awbNumber}` : ''}
+                {flash.status === 'shipped' ? ' · marked shipped' : ''}
+              </span>
+            </div>
+          )}
+
+          {saving && <p className="text-sm text-brand-ink/60">Saving…</p>}
+
+          {/* Pick an order for a scanned receipt */}
+          {pending && !fixedOrder && (
+            <div className="rounded-lg border border-brand-magenta/30 p-3">
+              <p className="text-sm mb-2">
+                Scanned <b className="break-all">{pending.awbNumber || 'tracking link'}</b>
+                {pending.partner ? ` (${pending.partner})` : ''}. Which order is it for?
+              </p>
+              <div className="relative mb-2">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-brand-ink/40" />
+                <input
+                  value={pickQuery}
+                  onChange={(e) => setPickQuery(e.target.value)}
+                  placeholder="Search order number, name or phone"
+                  className="w-full border rounded-lg pl-8 pr-3 py-2.5 text-sm"
+                />
+              </div>
+              <ul className="max-h-56 overflow-y-auto divide-y divide-brand-ink/5">
+                {candidates.map((o) => (
+                  <li key={o._id}>
+                    <button
+                      disabled={saving}
+                      onClick={() => saveToOrder(o, pending)}
+                      className="w-full text-left px-2 py-3 text-sm hover:bg-brand-ink/5 rounded-md flex justify-between gap-3 disabled:opacity-50"
+                    >
+                      <span className="min-w-0">
+                        <b>{o.orderNumber}</b> · {o.customer?.name}
+                        <span className="block text-xs text-brand-ink/50 capitalize truncate">
+                          {o.status}
+                          {o.courier?.awbNumber ? ` · has AWB ${o.courier.awbNumber}` : ''}
+                        </span>
                       </span>
-                    </span>
-                    <span className="text-xs text-brand-magenta self-center shrink-0">Use</span>
-                  </button>
-                </li>
-              ))}
-              {candidates.length === 0 && (
-                <li className="py-3 text-center text-xs text-brand-ink/40">No matching open orders.</li>
-              )}
-            </ul>
-            <button onClick={() => setPending(null)} className="mt-2 text-xs underline text-brand-ink/60">
-              Discard this scan
-            </button>
-          </div>
-        )}
-
-        {/* Manual / hardware scanner input */}
-        <form onSubmit={submitManual} className="mt-3 flex gap-2">
-          <input
-            value={manual}
-            onChange={(e) => setManual(e.target.value)}
-            placeholder="Or type / paste the AWB (USB scanners work here too)"
-            className="flex-1 border rounded-lg px-3 py-2 text-sm"
-          />
-          <button type="submit" className="btn-outline text-sm">Add</button>
-        </form>
-
-        {!fixedOrder && (
-          <label className="mt-3 flex items-center gap-2 text-sm text-brand-ink/70">
-            <input type="checkbox" checked={autoShip} onChange={(e) => setAutoShip(e.target.checked)} />
-            Mark the order as shipped after saving
-          </label>
-        )}
-        {fixedOrder && (
-          <label className="mt-3 flex items-center gap-2 text-sm text-brand-ink/70">
-            <input type="checkbox" checked={autoShip} onChange={(e) => setAutoShip(e.target.checked)} />
-            Also mark this order as shipped
-          </label>
-        )}
-
-        {/* Session log */}
-        {log.length > 0 && (
-          <div className="mt-4">
-            <h4 className="text-xs font-medium text-brand-ink/50 mb-1">Saved in this session ({log.length})</h4>
-            <ul className="divide-y divide-brand-ink/5 border rounded-lg">
-              {log.map(({ id, order }) => {
-                const wa = whatsappLink(order, order.status === 'shipped' ? 'shipped' : order.status);
-                return (
-                  <li key={id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <span>
-                      <b>{order.orderNumber}</b>
-                      <span className="block text-xs text-brand-ink/50">
-                        {[order.courier?.partner, order.courier?.awbNumber].filter(Boolean).join(' · ') || 'No AWB'}
-                      </span>
-                    </span>
-                    {wa ? (
-                      <a
-                        href={wa}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-green-700 hover:underline shrink-0"
-                      >
-                        <MessageCircle size={14} /> Notify
-                      </a>
-                    ) : (
-                      <span className="text-xs text-brand-ink/30 shrink-0">No phone</span>
-                    )}
+                      <span className="text-xs text-brand-magenta self-center shrink-0">Use</span>
+                    </button>
                   </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
+                ))}
+                {candidates.length === 0 && (
+                  <li className="py-3 text-center text-xs text-brand-ink/40">No matching open orders.</li>
+                )}
+              </ul>
+              <button onClick={() => setPending(null)} className="mt-2 text-xs underline text-brand-ink/60 py-1">
+                Discard this scan
+              </button>
+            </div>
+          )}
 
-        <div className="mt-4 flex justify-end">
-          <button onClick={close} className="btn-outline text-sm">Done</button>
+          {/* Manual / hardware scanner input */}
+          <form onSubmit={submitManual} className="flex gap-2">
+            <input
+              value={manual}
+              onChange={(e) => setManual(e.target.value)}
+              placeholder="Type or paste the AWB number"
+              autoCapitalize="characters"
+              className="flex-1 min-w-0 border rounded-lg px-3 py-2.5 text-sm"
+            />
+            <button type="submit" className="btn-outline text-sm shrink-0">Add</button>
+          </form>
+
+          <label className="flex items-center gap-2 text-sm text-brand-ink/70">
+            <input type="checkbox" checked={autoShip} onChange={(e) => setAutoShip(e.target.checked)} />
+            {fixedOrder ? 'Also mark this order as shipped' : 'Mark the order as shipped after saving'}
+          </label>
+
+          {log.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-brand-ink/50 mb-1">Saved in this session ({log.length})</h4>
+              <ul className="divide-y divide-brand-ink/5 border rounded-lg">
+                {log.map(({ id, order }) => {
+                  const wa = whatsappLink(order, order.status);
+                  return (
+                    <li key={id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                      <span className="min-w-0">
+                        <b>{order.orderNumber}</b>
+                        <span className="block text-xs text-brand-ink/50 truncate">
+                          {[order.courier?.partner, order.courier?.awbNumber].filter(Boolean).join(' · ') || 'No AWB'}
+                        </span>
+                      </span>
+                      {wa ? (
+                        <a
+                          href={wa}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-xs text-green-700 shrink-0 px-2 py-1.5 rounded-md border border-green-200"
+                        >
+                          <MessageCircle size={14} /> Notify
+                        </a>
+                      ) : (
+                        <span className="text-xs text-brand-ink/30 shrink-0">No phone</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-3 border-t border-brand-ink/10 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <button onClick={close} className="btn-outline text-sm w-full sm:w-auto sm:float-right">Done</button>
+          <div className="clear-both" />
         </div>
       </div>
     </div>
