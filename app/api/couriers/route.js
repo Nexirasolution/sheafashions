@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-// ⚠️ Adjust these two imports to match your project (same DB helper your other API routes use)
-import dbConnect from '@/lib/mongodb';
+// Same DB helper as your other API routes
+import { dbConnect } from '@/lib/mongodb';
 import Courier from '@/models/Courier';
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
