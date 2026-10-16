@@ -28,7 +28,7 @@ async function uploadDirect(file, folder, onProgress) {
     body: JSON.stringify({ folder, contentType: file.type, size: file.size }),
   });
   const sign = await safeJson(signRes);
-  if (!signRes.ok) throw new Error(sign.error || 'Could not start upload (are you logged in as admin?)');
+  if (!signRes.ok) throw new Error(sign.error || `Could not start upload (server replied ${signRes.status})`);
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
