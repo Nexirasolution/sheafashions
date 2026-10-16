@@ -6,8 +6,8 @@ import { Plus, Trash2, X, Upload, Loader2, Video } from 'lucide-react';
 
 const emptyForm = { title: '', videoUrl: '', thumbnail: '', instagramLink: '', product: '', sortOrder: 0 };
 
-const MAX_VIDEO_MB = 100; // Cloudinary free plan limit for videos
-const MAX_IMAGE_MB = 4;   // /api/upload limit (Vercel body limit)
+const MAX_VIDEO_MB = 100;
+const MAX_IMAGE_MB = 10;
 
 // Read a response as JSON without crashing when the server sends plain text
 // (Vercel returns text like "Request Entity Too Large" for oversized bodies).
@@ -19,55 +19,50 @@ async function safeJson(res) {
   }
 }
 
-// Videos go straight from the browser to Cloudinary using a signature from
+// Files go straight from the browser to Cloudflare R2 using a presigned URL from
 // /api/upload/sign, so they are not limited by Vercel's 4.5 MB request cap.
-function uploadVideoDirect(file, folder, onProgress) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const signRes = await fetch('/api/upload/sign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder }),
-      });
-      const sign = await safeJson(signRes);
-      if (!signRes.ok) throw new Error(sign.error || 'Could not start upload (are you logged in as admin?)');
+async function uploadDirect(file, folder, onProgress) {
+  const signRes = await fetch('/api/upload/sign', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder, contentType: file.type, size: file.size }),
+  });
+  const sign = await safeJson(signRes);
+  if (!signRes.ok) throw new Error(sign.error || 'Could not start upload (are you logged in as admin?)');
 
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('api_key', sign.apiKey);
-      fd.append('timestamp', sign.timestamp);
-      fd.append('signature', sign.signature);
-      fd.append('folder', sign.folder);
-      fd.append('public_id', sign.public_id);
-
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `https://api.cloudinary.com/v1_1/${sign.cloudName}/video/upload`);
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-      };
-      xhr.onload = () => {
-        let data = {};
-        try { data = JSON.parse(xhr.responseText); } catch {}
-        if (xhr.status >= 200 && xhr.status < 300 && data.secure_url) resolve(data.secure_url);
-        else reject(new Error(data.error?.message || 'Video upload failed'));
-      };
-      xhr.onerror = () => reject(new Error('Network error while uploading video'));
-      xhr.send(fd);
-    } catch (err) {
-      reject(err);
-    }
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', sign.uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve(sign.publicUrl);
+      else reject(new Error(`Upload failed (${xhr.status})`));
+    };
+    // A network error here is most often a missing CORS rule on the R2 bucket
+    xhr.onerror = () => reject(new Error('Upload blocked. Check the R2 bucket CORS settings.'));
+    xhr.send(file);
   });
 }
 
-async function uploadImageViaApi(file, folder) {
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('folder', folder);
-  const res = await fetch('/api/upload', { method: 'POST', body: fd });
-  const data = await safeJson(res);
-  if (res.status === 413) throw new Error(`Image is too large (max ${MAX_IMAGE_MB} MB)`);
-  if (!res.ok) throw new Error(data.error || 'Upload failed');
-  return data.url;
+// Downscale big photos to 1600px wide WebP in the browser (Cloudinary used to do this).
+// Falls back to the original file if the browser can't decode or re-encode it.
+async function shrinkImage(file, maxWidth = 1600) {
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, maxWidth / bitmap.width);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/webp', 0.85));
+    if (!blob || blob.type !== 'image/webp') return file;
+    return new File([blob], 'image.webp', { type: 'image/webp' });
+  } catch {
+    return file;
+  }
 }
 
 function UploadSlot({ value, accept, folder, placeholder, icon: Icon, preview: PreviewComp, isVideo, onChange }) {
@@ -89,9 +84,8 @@ function UploadSlot({ value, accept, folder, placeholder, icon: Icon, preview: P
     setUploading(true);
     setProgress(0);
     try {
-      const url = isVideo
-        ? await uploadVideoDirect(file, folder, setProgress)
-        : await uploadImageViaApi(file, folder);
+      const toUpload = isVideo ? file : await shrinkImage(file);
+      const url = await uploadDirect(toUpload, folder, setProgress);
       onChange(url);
       toast.success('Uploaded');
     } catch (err) {
@@ -119,7 +113,7 @@ function UploadSlot({ value, accept, folder, placeholder, icon: Icon, preview: P
         {uploading && (
           <div className="absolute inset-0 bg-white/70 flex flex-col items-center justify-center gap-1">
             <Loader2 size={22} className="animate-spin text-brand-magenta" />
-            {isVideo && <span className="text-xs text-brand-ink/70">{progress}%</span>}
+            <span className="text-xs text-brand-ink/70">{progress}%</span>
           </div>
         )}
       </div>
