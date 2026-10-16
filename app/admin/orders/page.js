@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ScanLine } from 'lucide-react';
 import { formatINR } from '@/lib/utils';
 import { buildProductIndex, resolveOrderItem } from '@/lib/orderItemResolver';
 import OrderItemModal from '@/components/admin/OrderItemModal';
+import ScanShipModal from '@/components/admin/ScanShipModal';
 
 const STATUSES = ['placed', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled', 'returned'];
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -66,6 +67,7 @@ export default function AdminOrdersPage() {
   const [pageSize, setPageSize] = useState(25);
   const [dateFrom, setDateFrom] = useState(''); // YYYY-MM-DD (inclusive)
   const [dateTo, setDateTo] = useState('');     // YYYY-MM-DD (inclusive)
+  const [scanOpen, setScanOpen] = useState(false);
 
   function setRange(from, to) {
     setDateFrom(from);
@@ -176,7 +178,16 @@ export default function AdminOrdersPage() {
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-bold text-brand-magenta mb-5">Orders</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <h1 className="font-display text-2xl font-bold text-brand-magenta">Orders</h1>
+        <button
+          onClick={() => setScanOpen(true)}
+          className="btn-outline text-sm inline-flex items-center gap-2"
+        >
+          <ScanLine size={16} />
+          Scan courier receipt
+        </button>
+      </div>
 
       <div className="flex flex-wrap gap-3 mb-4">
         <input
@@ -278,6 +289,7 @@ export default function AdminOrdersPage() {
                 <th className="p-3">Total</th>
                 <th className="p-3">Payment</th>
                 <th className="p-3">Status</th>
+                <th className="p-3">Courier</th>
                 <th className="p-3">Date</th>
                 <th className="p-3"></th>
               </tr>
@@ -316,6 +328,16 @@ export default function AdminOrdersPage() {
                   <td className="p-3">{formatINR(o.total)}</td>
                   <td className="p-3 capitalize">{o.paymentStatus}</td>
                   <td className="p-3 capitalize">{o.status}</td>
+                  <td className="p-3 text-xs text-brand-ink/60">
+                    {o.courier?.awbNumber ? (
+                      <>
+                        {o.courier?.partner && <span className="block">{o.courier.partner}</span>}
+                        <span className="block text-brand-ink/50">{o.courier.awbNumber}</span>
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                   <td className="p-3 text-xs text-brand-ink/50">{new Date(o.createdAt).toLocaleDateString('en-IN')}</td>
                   <td className="p-3"><Link href={`/admin/orders/${o._id}`} className="text-brand-magenta font-medium">View</Link></td>
                 </tr>
@@ -388,6 +410,12 @@ export default function AdminOrdersPage() {
         categoryName={modalItem?.categoryName}
         productSku={modalItem?.productSku}
         onClose={() => setModalItem(null)}
+      />
+
+      <ScanShipModal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onChanged={load}
       />
     </div>
   );

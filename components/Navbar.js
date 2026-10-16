@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Search, ShoppingBag, Menu, X, ChevronDown, ClipboardList, Heart, MessageCircle } from 'lucide-react';
+import { Search, ShoppingBag, Menu, X, ChevronDown, ClipboardList, Heart, MessageCircle, Info } from 'lucide-react';
 import { useCart } from './CartContext';
 import { useWishlist } from './WhishlistContext';
 import CouponMarquee from './CouponMarquee';
@@ -437,6 +437,16 @@ export default function Navbar({ categories = [], products = [], whatsappNumber 
                   Orders
                 </Link>
 
+                <Link
+                  href="/about"
+                  className="text-[13px] font-normal tracking-[1.5px] uppercase transition-colors"
+                  style={{ color: INK }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = GOLD)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = INK)}
+                >
+                  About
+                </Link>
+
                 <button
                   type="button"
                   onClick={openEnquiry}
@@ -669,6 +679,18 @@ export default function Navbar({ categories = [], products = [], whatsappNumber 
               <span className="flex items-center gap-2.5">
                 <ClipboardList size={16} strokeWidth={1.5} />
                 Orders
+              </span>
+            </Link>
+
+            <Link
+              href="/about"
+              onClick={closeMobileMenu}
+              className="flex items-center justify-between py-3.5 text-[14px] tracking-[1.5px] uppercase"
+              style={{ color: INK, borderBottom: `1px solid ${HAIRLINE}` }}
+            >
+              <span className="flex items-center gap-2.5">
+                <Info size={16} strokeWidth={1.5} />
+                About Us
               </span>
             </Link>
 
