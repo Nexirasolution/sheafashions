@@ -3,7 +3,7 @@
 // response shape as before: POST multipart { file, folder } -> { url }.
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { NextResponse } from 'next/server';
-import { r2, R2_BUCKET, IMAGE_TYPES, VIDEO_TYPES, cleanFolder, makeKey, publicUrl } from '@/lib/r2';
+import { r2, R2_BUCKET, IMAGE_TYPES, VIDEO_TYPES, cleanFolder, makeKey, publicUrl, missingR2Env } from '@/lib/r2';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +15,11 @@ export async function POST(req) {
   // TODO (recommended): if only admins should upload, verify the lb_admin_token
   // cookie here the same way app/admin/layout.js does, and return 401 if invalid.
   // If review photos must stay public, add a Vercel Firewall rate-limit rule on /api/upload.
+  const missing = missingR2Env();
+  if (missing.length) {
+    return NextResponse.json({ error: `Missing environment variables: ${missing.join(', ')}` }, { status: 500 });
+  }
+
   try {
     const formData = await req.formData();
     const file = formData.get('file');

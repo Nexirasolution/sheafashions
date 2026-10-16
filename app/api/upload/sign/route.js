@@ -5,7 +5,7 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/apiAuth';
-import { r2, R2_BUCKET, IMAGE_TYPES, VIDEO_TYPES, cleanFolder, makeKey, publicUrl } from '@/lib/r2';
+import { r2, R2_BUCKET, IMAGE_TYPES, VIDEO_TYPES, cleanFolder, makeKey, publicUrl, missingR2Env } from '@/lib/r2';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,11 +13,9 @@ export const dynamic = 'force-dynamic';
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
-const REQUIRED_ENV = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_PUBLIC_URL'];
-
 export const POST = requireAdmin(async (req) => {
   // Fail with a readable message (variable names only, never values) if setup is incomplete
-  const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+  const missing = missingR2Env();
   if (missing.length) {
     return NextResponse.json({ error: `Missing environment variables: ${missing.join(', ')}` }, { status: 500 });
   }
