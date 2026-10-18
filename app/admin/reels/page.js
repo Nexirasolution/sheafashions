@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Trash2, X, Upload, Loader2, Video } from 'lucide-react';
+import { Plus, Trash2, X, Upload, Loader2, Video, Pencil } from 'lucide-react';
 
-const emptyForm = { title: '', videoUrl: '', thumbnail: '', instagramLink: '', product: '', sortOrder: 0 };
+const emptyForm = { title: '', videoUrl: '', thumbnail: '', instagramLink: '', product: '', sortOrder: 0, isActive: true };
 
 // Tiles on the homepage are ~180px wide and autoplay, so keep videos small.
 const MAX_VIDEO_MB = 15;
@@ -145,6 +145,7 @@ export default function AdminReelsPage() {
   const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState(null); // null = creating a new reel
 
   async function load() {
     const [r1, r2] = await Promise.all([fetch('/api/reels?all=true'), fetch('/api/products?limit=200')]);
@@ -153,7 +154,22 @@ export default function AdminReelsPage() {
   }
   useEffect(() => { load(); }, []);
 
-  function closeForm() { setShowForm(false); setForm(emptyForm); }
+  function closeForm() { setShowForm(false); setForm(emptyForm); setEditingId(null); }
+
+  function startEdit(r) {
+    setForm({
+      title: r.title || '',
+      videoUrl: r.videoUrl || '',
+      thumbnail: r.thumbnail || '',
+      instagramLink: r.instagramLink || '',
+      product: r.product?._id || '',
+      sortOrder: r.sortOrder ?? 0,
+      isActive: r.isActive !== false,
+    });
+    setEditingId(r._id);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -161,9 +177,13 @@ export default function AdminReelsPage() {
     setSaving(true);
     try {
       const payload = { ...form, product: form.product || null, sortOrder: Number(form.sortOrder) || 0 };
-      const res = await fetch('/api/reels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await fetch(editingId ? `/api/reels/${editingId}` : '/api/reels', {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
       if (res.ok) {
-        toast.success('Reel added');
+        toast.success(editingId ? 'Reel updated' : 'Reel added');
         closeForm();
         load();
       } else {
@@ -186,7 +206,7 @@ export default function AdminReelsPage() {
     <div>
       <div className="flex items-center justify-between mb-5">
         <h1 className="font-display text-2xl font-bold text-brand-magenta">Shop by Reels</h1>
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-1 text-sm">
+        <button onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(true); }} className="btn-primary flex items-center gap-1 text-sm">
           <Plus size={16} /> Add Reel
         </button>
       </div>
@@ -194,7 +214,7 @@ export default function AdminReelsPage() {
       {showForm && (
         <form onSubmit={submit} className="card-soft p-5 mb-6 space-y-3">
           <div className="flex justify-between">
-            <h2 className="font-semibold">New Reel</h2>
+            <h2 className="font-semibold">{editingId ? 'Edit Reel' : 'New Reel'}</h2>
             <button type="button" onClick={closeForm}><X size={18} /></button>
           </div>
 
@@ -253,8 +273,17 @@ export default function AdminReelsPage() {
             />
           </div>
 
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.isActive}
+              onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+            />
+            Show on homepage
+          </label>
+
           <button disabled={saving} className="btn-primary text-sm disabled:opacity-60">
-            {saving ? 'Saving...' : 'Create'}
+            {saving ? 'Saving...' : editingId ? 'Save changes' : 'Create'}
           </button>
         </form>
       )}
@@ -271,9 +300,15 @@ export default function AdminReelsPage() {
                   : null
               }
             </div>
-            <div className="p-2 flex items-center justify-between">
-              <p className="text-xs line-clamp-1">{r.product?.name || r.title || 'Reel'}</p>
-              <button onClick={() => remove(r._id)} className="text-brand-magenta" aria-label="Delete reel"><Trash2 size={14} /></button>
+            <div className="p-2 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs line-clamp-1">{r.product?.name || r.title || 'Reel'}</p>
+                {r.isActive === false && <p className="text-[10px] text-brand-ink/50">Hidden</p>}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={() => startEdit(r)} className="text-brand-ink/70 hover:text-brand-magenta" aria-label="Edit reel"><Pencil size={14} /></button>
+                <button onClick={() => remove(r._id)} className="text-brand-magenta" aria-label="Delete reel"><Trash2 size={14} /></button>
+              </div>
             </div>
           </div>
         ))}
