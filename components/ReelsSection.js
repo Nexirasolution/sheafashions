@@ -112,8 +112,8 @@ export default function ReelsSection({ reels }) {
             <span style={{ width: '28px', height: '1px', background: HAIRLINE }} />
           </div>
 
-          {/* <a
-            href="https://instagram.com/ssrkcollections"
+          <a
+            href="https://www.instagram.com/aari_by_shea_tirupur?vrfl=c3F4bjhqanJhcXV3"
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 mt-5 text-[12px] tracking-[1.5px] uppercase transition-colors hover:opacity-70"
@@ -121,7 +121,7 @@ export default function ReelsSection({ reels }) {
           >
             <Instagram size={14} strokeWidth={1.5} />
             <span style={{ borderBottom: `1px solid ${GOLD}` }}>Follow us on Instagram</span>
-          </a> */}
+          </a>
         </div>
 
         {/* Reels row: square-cornered tiles, caption sits below the media */}
