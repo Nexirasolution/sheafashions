@@ -6,7 +6,8 @@ import { Plus, Trash2, X, Upload, Loader2, Video } from 'lucide-react';
 
 const emptyForm = { title: '', videoUrl: '', thumbnail: '', instagramLink: '', product: '', sortOrder: 0 };
 
-const MAX_VIDEO_MB = 100;
+// Tiles on the homepage are ~180px wide and autoplay, so keep videos small.
+const MAX_VIDEO_MB = 15;
 const MAX_IMAGE_MB = 10;
 
 // Read a response as JSON without crashing when the server sends plain text
@@ -47,7 +48,7 @@ async function uploadDirect(file, folder, onProgress) {
   });
 }
 
-// Downscale big photos to 1600px wide WebP in the browser (Cloudinary used to do this).
+// Downscale big photos to 1600px wide WebP in the browser.
 // Falls back to the original file if the browser can't decode or re-encode it.
 async function shrinkImage(file, maxWidth = 1600) {
   try {
@@ -121,7 +122,7 @@ function UploadSlot({ value, accept, folder, placeholder, icon: Icon, preview: P
 
       {/* Manual URL fallback */}
       <input
-        placeholder={`Or paste URL — ${placeholder}`}
+        placeholder={`Or paste URL: ${placeholder}`}
         className="w-full border rounded-lg px-3 py-2 text-xs text-brand-ink/60"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -147,8 +148,8 @@ export default function AdminReelsPage() {
 
   async function load() {
     const [r1, r2] = await Promise.all([fetch('/api/reels?all=true'), fetch('/api/products?limit=200')]);
-    setReels((await r1.json()).reels || []);
-    setProducts((await r2.json()).products || []);
+    setReels((await safeJson(r1)).reels || []);
+    setProducts((await safeJson(r2)).products || []);
   }
   useEffect(() => { load(); }, []);
 
@@ -159,7 +160,7 @@ export default function AdminReelsPage() {
     if (!form.videoUrl) { toast.error('Please upload a video'); return; }
     setSaving(true);
     try {
-      const payload = { ...form, product: form.product || null };
+      const payload = { ...form, product: form.product || null, sortOrder: Number(form.sortOrder) || 0 };
       const res = await fetch('/api/reels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) {
         toast.success('Reel added');
@@ -176,7 +177,8 @@ export default function AdminReelsPage() {
 
   async function remove(id) {
     if (!confirm('Delete this reel?')) return;
-    await fetch(`/api/reels/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/reels/${id}`, { method: 'DELETE' });
+    if (!res.ok) toast.error('Could not delete reel');
     load();
   }
 
@@ -198,10 +200,12 @@ export default function AdminReelsPage() {
 
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <p className="text-xs font-medium text-brand-ink/60 mb-1">Video * (.mp4, .mov, up to {MAX_VIDEO_MB} MB)</p>
+              <p className="text-xs font-medium text-brand-ink/60 mb-1">
+                Video * (.mp4 or .webm, 720p or lower, up to {MAX_VIDEO_MB} MB)
+              </p>
               <UploadSlot
                 value={form.videoUrl}
-                accept="video/*"
+                accept="video/mp4,video/webm"
                 folder="reels-videos"
                 placeholder="Click to upload video"
                 icon={Video}
@@ -211,7 +215,9 @@ export default function AdminReelsPage() {
               />
             </div>
             <div>
-              <p className="text-xs font-medium text-brand-ink/60 mb-1">Thumbnail image (up to {MAX_IMAGE_MB} MB)</p>
+              <p className="text-xs font-medium text-brand-ink/60 mb-1">
+                Thumbnail image (shown while loading and in Low Power Mode, up to {MAX_IMAGE_MB} MB)
+              </p>
               <UploadSlot
                 value={form.thumbnail}
                 accept="image/*"
@@ -237,6 +243,15 @@ export default function AdminReelsPage() {
             <option value="">Link to product (optional)</option>
             {products.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
           </select>
+          <div>
+            <p className="text-xs font-medium text-brand-ink/60 mb-1">Display order (lower numbers show first)</p>
+            <input
+              type="number"
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+              value={form.sortOrder}
+              onChange={(e) => setForm({ ...form, sortOrder: e.target.value })}
+            />
+          </div>
 
           <button disabled={saving} className="btn-primary text-sm disabled:opacity-60">
             {saving ? 'Saving...' : 'Create'}
@@ -258,7 +273,7 @@ export default function AdminReelsPage() {
             </div>
             <div className="p-2 flex items-center justify-between">
               <p className="text-xs line-clamp-1">{r.product?.name || r.title || 'Reel'}</p>
-              <button onClick={() => remove(r._id)} className="text-brand-magenta"><Trash2 size={14} /></button>
+              <button onClick={() => remove(r._id)} className="text-brand-magenta" aria-label="Delete reel"><Trash2 size={14} /></button>
             </div>
           </div>
         ))}

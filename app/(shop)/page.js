@@ -19,10 +19,10 @@ import { ArrowRight, Tag } from 'lucide-react';
 
 // ISR: the page is built once and served from the CDN, then regenerated in the
 // background at most every 10 minutes. Visitors and bots no longer trigger a
-// function + 7 DB queries on every request. (Replaces `force-dynamic`.)
-// The admin settings API calls revalidatePath('/') on save, so live-link changes
+// function + 7 DB queries on every request.
+// The settings and reels APIs call revalidatePath('/') on save, so those changes
 // show instantly. For other admin changes (products, banners, categories, combos,
-// reels, reviews) call revalidatePath('/') in those API routes as well.
+// reviews) call revalidatePath('/') in those API routes as well.
 export const revalidate = 600;
 
 // Design tokens: shared teal / gold / cream theme
@@ -64,11 +64,10 @@ async function getData() {
     // Only main categories here: subcategories are excluded from the
     // homepage "Shop by Category" grid.
     Category.find({ isActive: true, parent: null }).limit(10).lean(),
-    // Reels: newest first, with the linked product's name + slug for the
-    // caption and "Shop now" link. Remove the isActive filter if your Reel
-    // model has no such field.
+    // Reels: manual order from admin first, then newest first, with the linked
+    // product's name + slug for the caption and "Shop now" link.
     Reel.find({ isActive: true })
-      .sort({ createdAt: -1 })
+      .sort({ sortOrder: 1, createdAt: -1 })
       .populate('product', 'name slug')
       .limit(REELS_LIMIT)
       .lean(),
@@ -200,12 +199,13 @@ export default async function HomePage() {
 
       {/* Featured collection: centered copy, up to 6 New Arrivals, CTA */}
       <section className="max-w-6xl mx-auto px-4 pt-6 pb-16 text-center">
-        <h3
+        {/* h2 (was h3): keeps heading levels in order for SEO and accessibility */}
+        <h2
           className="text-lg sm:text-xl font-bold tracking-[3px] uppercase"
           style={{ color: TEAL, fontFamily: FONT_SANS }}
         >
           Featured Collection
-        </h3>
+        </h2>
 
         {/* 2/3/4 columns so each ProductCard renders large */}
         {plainNewArrivals.length > 0 && (
@@ -347,7 +347,7 @@ export default async function HomePage() {
             </div>
 
             <div className="mt-8 text-center sm:hidden">
-              <Link href="/combo" className="text-sm font-bold" style={{ color: TEAL, fontFamily: FONT_SANS }}>
+              <Link href="/combos" className="text-sm font-bold" style={{ color: TEAL, fontFamily: FONT_SANS }}>
                 View all combos →
               </Link>
             </div>
