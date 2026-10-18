@@ -112,7 +112,7 @@ export default function ReelsSection({ reels }) {
             <span style={{ width: '28px', height: '1px', background: HAIRLINE }} />
           </div>
 
-          <a
+          {/* <a
             href="https://instagram.com/ssrkcollections"
             target="_blank"
             rel="noreferrer"
@@ -121,7 +121,7 @@ export default function ReelsSection({ reels }) {
           >
             <Instagram size={14} strokeWidth={1.5} />
             <span style={{ borderBottom: `1px solid ${GOLD}` }}>Follow us on Instagram</span>
-          </a>
+          </a> */}
         </div>
 
         {/* Reels row: square-cornered tiles, caption sits below the media */}
