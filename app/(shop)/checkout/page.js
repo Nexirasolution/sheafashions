@@ -26,19 +26,75 @@ const inputStyle = { border: `1px solid ${LINE}`, borderRadius: '3px', color: IN
 
 const sectionHeadClass = 'text-[11px] font-medium uppercase tracking-[0.18em] mb-4';
 
-function SSRKInput({ placeholder, type = 'text', value, onChange, autoComplete, inputMode, maxLength }) {
+// ---------- Validation ----------
+const validators = {
+  name: (v) => {
+    const s = v.trim();
+    if (!s) return 'Full name is required';
+    if (s.length < 3) return 'Enter your full name';
+    if (!/^[A-Za-z][A-Za-z .'-]*$/.test(s)) return 'Name can only contain letters';
+    return '';
+  },
+  phone: (v) => {
+    if (!v) return 'Phone number is required';
+    if (!/^\d+$/.test(v)) return 'Digits only';
+    if (v.length !== 10) return 'Phone number must be exactly 10 digits';
+    if (!/^[6-9]/.test(v)) return 'Enter a valid Indian mobile number (starts with 6–9)';
+    if (/^(\d)\1{9}$/.test(v)) return 'Enter a valid phone number';
+    return '';
+  },
+  email: (v) => {
+    if (!v.trim()) return ''; // optional
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim()) ? '' : 'Enter a valid email address';
+  },
+  line1: (v) => {
+    const s = v.trim();
+    if (!s) return 'Address is required';
+    if (s.length < 5) return 'Address is too short';
+    if (!/[A-Za-z0-9]/.test(s)) return 'Enter a valid address';
+    return '';
+  },
+  city: (v) => {
+    const s = v.trim();
+    if (!s) return 'City is required';
+    if (s.length < 2) return 'Enter a valid city';
+    if (!/^[A-Za-z][A-Za-z .'-]*$/.test(s)) return 'City can only contain letters';
+    return '';
+  },
+  state: (v) => (v ? '' : 'Select your state'),
+  pincode: (v) => {
+    if (!v) return 'Pincode is required';
+    if (!/^[1-9]\d{5}$/.test(v)) return 'Pincode must be exactly 6 digits';
+    return '';
+  },
+};
+
+// Strips non-digits, drops +91 / 91 / 0 prefix if pasted, caps at 10 digits
+function cleanPhone(raw) {
+  let d = raw.replace(/\D/g, '');
+  if (d.length > 10 && d.startsWith('91')) d = d.slice(2);
+  if (d.length > 10 && d.startsWith('0')) d = d.slice(1);
+  return d.slice(0, 10);
+}
+
+function SSRKInput({ placeholder, type = 'text', value, onChange, onBlur, autoComplete, inputMode, maxLength, error }) {
   return (
-    <input
-      type={type}
-      placeholder={placeholder}
-      autoComplete={autoComplete}
-      inputMode={inputMode}
-      maxLength={maxLength}
-      value={value}
-      onChange={onChange}
-      className={inputClass}
-      style={inputStyle}
-    />
+    <div>
+      <input
+        type={type}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        inputMode={inputMode}
+        maxLength={maxLength}
+        value={value}
+        onChange={onChange}
+        onBlur={onBlur}
+        aria-invalid={Boolean(error)}
+        className={inputClass}
+        style={{ ...inputStyle, borderColor: error ? RUST : LINE }}
+      />
+      {error && <p className="text-[11px] mt-1" style={{ color: RUST }}>{error}</p>}
+    </div>
   );
 }
 
@@ -49,6 +105,7 @@ export default function CheckoutPage() {
     name: '', phone: '', email: '',
     line1: '', line2: '', city: '', state: '', pincode: '', landmark: ''
   });
+  const [touched, setTouched] = useState({});
 
   // Coupon: `coupon` is what the user types, `appliedCoupon` is only set
   // after the server confirms the code is valid.
@@ -68,6 +125,18 @@ export default function CheckoutPage() {
 
   const discountedSubtotal = subtotal - discount;
   const total = shipping !== null ? Math.round(discountedSubtotal + shipping) : null;
+
+  // Validation state
+  const errors = useMemo(() => {
+    const e = {};
+    Object.keys(validators).forEach((k) => { e[k] = validators[k](form[k] || ''); });
+    return e;
+  }, [form]);
+
+  const isFormValid = Object.values(errors).every((m) => !m);
+
+  const touch = (field) => setTouched((t) => ({ ...t, [field]: true }));
+  const err = (field) => (touched[field] ? errors[field] : '');
 
   // Physical pieces across the cart (fallback weight only).
   const totalQty = totalPieces;
@@ -116,7 +185,11 @@ export default function CheckoutPage() {
 
   useEffect(() => { fetchShipping(); }, [fetchShipping]);
 
-  function update(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+  function update(field, value) {
+    if (field === 'phone') value = cleanPhone(value);
+    if (field === 'pincode') value = value.replace(/\D/g, '').slice(0, 6);
+    setForm((f) => ({ ...f, [field]: value }));
+  }
 
   async function applyCoupon(codeArg) {
     const code = (typeof codeArg === 'string' ? codeArg : coupon).trim();
@@ -215,8 +288,11 @@ export default function CheckoutPage() {
   }
 
   async function placeOrder() {
-    if (!form.name || !form.phone || !form.line1 || !form.city || !form.state || !form.pincode) {
-      toast.error('Please fill all required fields'); return;
+    if (!isFormValid) {
+      setTouched({ name: true, phone: true, email: true, line1: true, city: true, state: true, pincode: true });
+      const firstError = Object.values(errors).find(Boolean);
+      toast.error(firstError || 'Please fix the highlighted fields');
+      return;
     }
     if (!deliverable) { toast.error(`Sorry, we don't deliver to ${form.state} yet`); return; }
     if (items.length === 0) { toast.error('Your cart is empty'); return; }
@@ -245,6 +321,17 @@ export default function CheckoutPage() {
       ...(i.packDetails ? { packDetails: i.packDetails } : {}),
     }));
 
+    // Send trimmed values to the server
+    const cleanForm = {
+      ...form,
+      name: form.name.trim(),
+      email: form.email.trim(),
+      line1: form.line1.trim(),
+      line2: form.line2.trim(),
+      city: form.city.trim(),
+      landmark: form.landmark.trim(),
+    };
+
     try {
       if (paymentMethod === 'razorpay') {
         // Server recomputes the total (shipping from DB-derived weights
@@ -257,8 +344,8 @@ export default function CheckoutPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             items: orderItems,
-            customer: { name: form.name, phone: form.phone, email: form.email },
-            shippingAddress: form,
+            customer: { name: cleanForm.name, phone: cleanForm.phone, email: cleanForm.email },
+            shippingAddress: cleanForm,
             couponCode: appliedCoupon,
             expectedTotal: total
           })
@@ -277,7 +364,7 @@ export default function CheckoutPage() {
           currency: 'INR',
           name: 'Shea Fashions',
           order_id: orderData.order.id,
-          prefill: { name: form.name, contact: form.phone, email: form.email },
+          prefill: { name: cleanForm.name, contact: cleanForm.phone, email: cleanForm.email },
           theme: { color: '#064E4A' },
           handler: async function (response) {
             // Fast path — if this fails or never runs, the webhook creates
@@ -288,8 +375,8 @@ export default function CheckoutPage() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 items: orderItems,
-                customer: { name: form.name, phone: form.phone, email: form.email },
-                shippingAddress: form,
+                customer: { name: cleanForm.name, phone: cleanForm.phone, email: cleanForm.email },
+                shippingAddress: cleanForm,
                 couponCode: appliedCoupon,
                 paymentMethod: 'razorpay',
                 razorpayOrderId: response.razorpay_order_id,
@@ -320,8 +407,8 @@ export default function CheckoutPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             items: orderItems,
-            customer: { name: form.name, phone: form.phone, email: form.email },
-            shippingAddress: form,
+            customer: { name: cleanForm.name, phone: cleanForm.phone, email: cleanForm.email },
+            shippingAddress: cleanForm,
             couponCode: appliedCoupon,
             paymentMethod: 'cod'
           })
@@ -338,7 +425,8 @@ export default function CheckoutPage() {
   }
 
   const placeOrderDisabled =
-    submitting || shippingLoading || checkingStock || applyingCoupon || shipping === null || !deliverable;
+    submitting || shippingLoading || checkingStock || applyingCoupon ||
+    shipping === null || !deliverable || !isFormValid;
 
   // Only show the "add ₹X more for free shipping" banner when a free-shipping
   // threshold applies (> 0, already resolved for the chosen state) and the
@@ -384,50 +472,95 @@ export default function CheckoutPage() {
         <div>
           <p className={sectionHeadClass} style={{ color: TEAL }}>Shipping Details</p>
           <div className="space-y-3">
-            <SSRKInput placeholder="Full Name *" autoComplete="name" value={form.name} onChange={(e) => update('name', e.target.value)} />
-            <SSRKInput placeholder="Phone Number *" type="tel" inputMode="numeric" autoComplete="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} />
-            <SSRKInput placeholder="Email (optional)" type="email" autoComplete="email" value={form.email} onChange={(e) => update('email', e.target.value)} />
-            <SSRKInput placeholder="Address Line 1 *" autoComplete="address-line1" value={form.line1} onChange={(e) => update('line1', e.target.value)} />
-            <SSRKInput placeholder="Address Line 2" autoComplete="address-line2" value={form.line2} onChange={(e) => update('line2', e.target.value)} />
+            <SSRKInput
+              placeholder="Full Name *"
+              autoComplete="name"
+              value={form.name}
+              onChange={(e) => update('name', e.target.value)}
+              onBlur={() => touch('name')}
+              error={err('name')}
+            />
+            <SSRKInput
+              placeholder="Phone Number (10 digits) *"
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={10}
+              value={form.phone}
+              onChange={(e) => update('phone', e.target.value)}
+              onBlur={() => touch('phone')}
+              error={err('phone')}
+            />
+            <SSRKInput
+              placeholder="Email (optional)"
+              type="email"
+              autoComplete="email"
+              value={form.email}
+              onChange={(e) => update('email', e.target.value)}
+              onBlur={() => touch('email')}
+              error={err('email')}
+            />
+            <SSRKInput
+              placeholder="Address Line 1 *"
+              autoComplete="address-line1"
+              value={form.line1}
+              onChange={(e) => update('line1', e.target.value)}
+              onBlur={() => touch('line1')}
+              error={err('line1')}
+            />
+            <SSRKInput
+              placeholder="Address Line 2"
+              autoComplete="address-line2"
+              value={form.line2}
+              onChange={(e) => update('line2', e.target.value)}
+            />
             <div className="grid grid-cols-2 gap-3">
-              <input
+              <SSRKInput
                 placeholder="City *"
                 autoComplete="address-level2"
                 value={form.city}
                 onChange={(e) => update('city', e.target.value)}
-                className={inputClass}
-                style={inputStyle}
+                onBlur={() => touch('city')}
+                error={err('city')}
               />
-              <select
-                autoComplete="address-level1"
-                value={form.state}
-                onChange={(e) => update('state', e.target.value)}
-                className={inputClass}
-                style={{ ...inputStyle, color: form.state ? INK : INK_SOFT }}
-              >
-                <option value="">State *</option>
-                {INDIAN_STATES.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+              <div>
+                <select
+                  autoComplete="address-level1"
+                  value={form.state}
+                  onChange={(e) => update('state', e.target.value)}
+                  onBlur={() => touch('state')}
+                  className={inputClass}
+                  style={{
+                    ...inputStyle,
+                    borderColor: err('state') ? RUST : LINE,
+                    color: form.state ? INK : INK_SOFT,
+                  }}
+                >
+                  <option value="">State *</option>
+                  {INDIAN_STATES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                {err('state') && (
+                  <p className="text-[11px] mt-1" style={{ color: RUST }}>{err('state')}</p>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <input
-                placeholder="Pincode *"
+              <SSRKInput
+                placeholder="Pincode (6 digits) *"
                 inputMode="numeric"
                 maxLength={6}
                 autoComplete="postal-code"
                 value={form.pincode}
                 onChange={(e) => update('pincode', e.target.value)}
-                className={inputClass}
-                style={inputStyle}
+                onBlur={() => touch('pincode')}
+                error={err('pincode')}
               />
-              <input
+              <SSRKInput
                 placeholder="Landmark"
                 value={form.landmark}
                 onChange={(e) => update('landmark', e.target.value)}
-                className={inputClass}
-                style={inputStyle}
               />
             </div>
           </div>
@@ -560,13 +693,15 @@ export default function CheckoutPage() {
           >
             {submitting
               ? (checkingStock ? 'Checking stock…' : 'Placing Order…')
-              : !deliverable
-                ? 'Not deliverable to this state'
-                : shippingLoading
-                  ? 'Calculating shipping…'
-                  : total !== null
-                    ? `Place Order — ${formatINR(total)}`
-                    : 'Place Order'
+              : !isFormValid
+                ? 'Complete shipping details'
+                : !deliverable
+                  ? 'Not deliverable to this state'
+                  : shippingLoading
+                    ? 'Calculating shipping…'
+                    : total !== null
+                      ? `Place Order — ${formatINR(total)}`
+                      : 'Place Order'
             }
           </button>
         </div>
