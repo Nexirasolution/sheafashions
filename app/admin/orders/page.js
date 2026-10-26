@@ -11,6 +11,7 @@ import StatusBadge from '@/components/admin/StatusBadge';
 
 const STATUSES = ['placed', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled', 'returned'];
 const PAGE_SIZES = [10, 25, 50, 100];
+const FETCH_LIMIT = 5000; // must match MAX_LIMIT in the API route
 
 // Local-time YYYY-MM-DD, the format <input type="date"> uses
 function toInputDate(d) {
@@ -57,6 +58,7 @@ function pageList(current, total) {
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState([]);
+  const [serverTotal, setServerTotal] = useState(0); // total matching orders in the DB (before the fetch cap)
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [status, setStatus] = useState('');
@@ -82,6 +84,13 @@ export default function AdminOrdersPage() {
       const params = new URLSearchParams();
       if (status) params.set('status', status);
       if (search) params.set('search', search);
+      // Date range is applied on the server, using the admin's local day
+      // boundaries (sent as ISO timestamps so server timezone is irrelevant).
+      if (dateFrom) params.set('from', new Date(`${dateFrom}T00:00:00`).toISOString());
+      if (dateTo) params.set('to', new Date(`${dateTo}T23:59:59.999`).toISOString());
+      // Category filtering + pagination happen client-side, so fetch the full set.
+      params.set('limit', String(FETCH_LIMIT));
+
       const res = await fetch(`/api/orders?${params.toString()}`);
       if (!res.ok) {
         const text = await res.text().catch(() => '');
@@ -89,16 +98,19 @@ export default function AdminOrdersPage() {
       }
       const data = await res.json();
       setOrders(data.orders || []);
+      setServerTotal(data.total ?? (data.orders || []).length);
       setPage(1);
     } catch (err) {
       console.error(err);
       setOrders([]);
+      setServerTotal(0);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, [status]);
+  // Reload whenever a server-side filter changes
+  useEffect(() => { load(); }, [status, dateFrom, dateTo]);
 
   useEffect(() => {
     fetch('/api/products?limit=200')
@@ -134,26 +146,17 @@ export default function AdminOrdersPage() {
     });
   }, [orders, index]);
 
+  // Status, search and dates are already applied by the server;
+  // only the category filter (needs product data) runs here.
   const filteredOrders = useMemo(() => {
-    // Date range is inclusive of both days, in the admin's local time
-    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
-    const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
-
+    if (categoryFilter === 'all') return enrichedOrders;
     return enrichedOrders.filter((o) => {
-      if (fromTs !== null || toTs !== null) {
-        const ts = new Date(o.createdAt).getTime();
-        if (Number.isNaN(ts)) return false;
-        if (fromTs !== null && ts < fromTs) return false;
-        if (toTs !== null && ts > toTs) return false;
-      }
-
-      if (categoryFilter === 'all') return true;
       for (const cid of o.categoryIds) {
         if (cid === categoryFilter || parentId(cid) === categoryFilter) return true;
       }
       return false;
     });
-  }, [enrichedOrders, categoryFilter, categories, dateFrom, dateTo]);
+  }, [enrichedOrders, categoryFilter, categories]);
 
   // ── Pagination (applied after the filters) ──
   const totalOrders = filteredOrders.length;
@@ -166,6 +169,7 @@ export default function AdminOrdersPage() {
   );
   const showingFrom = totalOrders === 0 ? 0 : startIdx + 1;
   const showingTo = Math.min(startIdx + pageSize, totalOrders);
+  const truncated = serverTotal > orders.length;
 
   function goTo(p) {
     setPage(Math.min(Math.max(1, p), totalPages));
@@ -288,6 +292,13 @@ export default function AdminOrdersPage() {
             </button>
           )}
         </div>
+
+        {/* Shown only if there are more matches than the fetch cap */}
+        {!loading && truncated && (
+          <p className="text-xs rounded-lg bg-amber-50 text-amber-800 border border-amber-200 px-3 py-2">
+            Showing the newest {orders.length} of {serverTotal} matching orders. Narrow the date range or search to see older ones.
+          </p>
+        )}
       </div>
 
       {loading ? (

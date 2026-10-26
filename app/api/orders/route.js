@@ -6,6 +6,8 @@ import { requireAdmin } from '@/lib/apiAuth';
 import { createOrderIdempotent } from '@/lib/orderService';
 import { OrderError } from '@/lib/orderCalc';
 
+const MAX_LIMIT = 5000;
+
 export async function POST(req) {
   try {
     await dbConnect();
@@ -32,22 +34,41 @@ export async function POST(req) {
   }
 }
 
+function parseDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export const GET = requireAdmin(async (req) => {
   await dbConnect();
   const { searchParams } = new URL(req.url);
   const status = searchParams.get('status');
   const search = searchParams.get('search');
+  // `from` / `to` are ISO timestamps (the client converts the admin's local
+  // day boundaries), so the server's timezone doesn't matter.
+  const from = parseDate(searchParams.get('from'));
+  const to = parseDate(searchParams.get('to'));
+
   const query = {};
   if (status) query.status = status;
   if (search) {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     query.$or = [
-      { orderNumber: { $regex: search, $options: 'i' } },
-      { 'customer.name': { $regex: search, $options: 'i' } },
-      { 'customer.phone': { $regex: search, $options: 'i' } }
+      { orderNumber: { $regex: escaped, $options: 'i' } },
+      { 'customer.name': { $regex: escaped, $options: 'i' } },
+      { 'customer.phone': { $regex: escaped, $options: 'i' } }
     ];
   }
-  const page = Number(searchParams.get('page') || 1);
-  const limit = Number(searchParams.get('limit') || 20);
+  if (from || to) {
+    query.createdAt = {};
+    if (from) query.createdAt.$gte = from;
+    if (to) query.createdAt.$lte = to;
+  }
+
+  const page = Math.max(1, Number(searchParams.get('page') || 1));
+  const limit = Math.min(Math.max(1, Number(searchParams.get('limit') || 20)), MAX_LIMIT);
+
   const [orders, total] = await Promise.all([
     Order.find(query)
       .sort({ createdAt: -1 })
